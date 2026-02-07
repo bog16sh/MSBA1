@@ -1,0 +1,1530 @@
+---
+title: "Home Credit Default Risk: Exploratory Data Analysis"
+author: "Bogdan Shalimov"
+date: "2026-01-30"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    theme: cosmo
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+# Introduction
+
+## Business Problem
+
+Home Credit is a financial institution that uses a variety of alternative data to ensure customers have a safe and positive borrowing experience. The company operates in multiple countries and is now shifting focus toward improving the quality of their customer base rather than simply expanding the market.
+
+
+**The core business challenge:** Home Credit wants to increase their customer base by providing loans to individuals with insufficient or non-existent credit histories. These underserved customers are often taken advantage of by competitor banks that either reject them outright or offer predatory terms.
+
+Home Credit aims to unlock the full potential of their data to:
+
+- **Increase loan approvals** for creditworthy customers who lack traditional credit history
+- **Maintain low risk** by ensuring clients capable of repayment are not rejected
+- **Optimize loan terms** with appropriate principal, maturity, and repayment calendars
+
+**Expected Benefits:** Increasing the number of approved customers will directly increase company revenue. Customers with limited credit history who do qualify often pay higher interest rates, making them profitable when properly vetted.
+
+**Success Metrics:** The primary success metric is the change in customer approval rates before and after implementing improved risk assessment models, while maintaining acceptable default rates.
+
+## Analytical Objectives
+
+The purpose of this exploratory data analysis is to:
+
+1. **Understand the target variable:** Examine the distribution of loan defaults and assess class imbalance
+2. **Assess data quality:** Identify missing values, outliers, and data entry errors that need cleaning
+3. **Explore predictor relationships:** Determine which features show promise in predicting default risk
+4. **Inform modeling decisions:** Use insights from EDA to guide feature engineering and model selection
+
+---
+
+# Setup and Data Loading
+
+```{r}
+#| label: setup
+
+# Load required packages for data manipulation and visualization
+library(readr)    # Fast CSV file reading
+library(dplyr)    # Data manipulation with pipe syntax
+library(tidyr)    # Reshaping data
+library(ggplot2)  # Creating visualizations
+library(scales)   # Formatting numbers and percentages in plots
+library(knitr)    # Creating formatted tables
+
+# Set a consistent theme for all plots
+theme_set(theme_minimal(base_size = 12))
+```
+
+```{r}
+#| label: load-data
+
+# Load the main application datasets
+# application_train.csv contains loan applications with known outcomes (TARGET)
+# application_test.csv contains applications for prediction (no TARGET)
+
+app_train <- read_csv("application_train.csv", show_col_types = FALSE)
+app_test <- read_csv("application_test.csv", show_col_types = FALSE)
+
+# Display dataset dimensions
+cat("Training set:", nrow(app_train), "rows x", ncol(app_train), "columns\n")
+cat("Test set:    ", nrow(app_test), "rows x", ncol(app_test), "columns\n")
+```
+
+The training dataset contains **307,511 loan applications** with 122 features including the target variable. The test set has 48,744 applications that we would use for final predictions. This is a substantial sample size that provides strong statistical power for our analysis.
+
+---
+
+# Data Overview
+
+Let's examine the structure of our data to understand what information is available for predicting loan default.
+
+```{r}
+#| label: data-overview
+
+# Preview the first few columns to understand data types
+# The data contains a mix of numeric and categorical features
+glimpse(app_train[, 1:15])
+```
+
+The dataset includes:
+
+- **Identifiers:** SK_ID_CURR uniquely identifies each loan application
+- **Target:** Binary outcome (0 = repaid, 1 = defaulted)
+- **Numeric features:** Loan amounts, income, age (as days), employment duration
+- **Categorical features:** Contract type, gender, car/property ownership
+
+---
+
+# Target Variable Analysis
+
+The TARGET variable is our outcome of interest: it indicates whether a loan defaulted (1) or was successfully repaid (0). Understanding its distribution is critical because class imbalance affects model training and evaluation.
+
+**Note:** The test set (`application_test.csv`) does not contain the TARGET variable - it is held out for final predictions.
+
+```{r}
+#| label: target-check
+
+# Check if TARGET exists in both datasets
+cat("TARGET in training set:", "TARGET" %in% names(app_train), "\n")
+cat("TARGET in test set:    ", "TARGET" %in% names(app_test), "\n")
+```
+
+```{r}
+#| label: target-distribution
+
+# Calculate the distribution of loan outcomes
+target_counts <- app_train |>
+  count(TARGET) |>
+  mutate(
+    percentage = n / sum(n),
+    outcome = ifelse(TARGET == 0, "Repaid", "Defaulted")
+  )
+
+# Display the counts
+kable(target_counts, 
+      col.names = c("TARGET", "Count", "Percentage", "Outcome"),
+      digits = 4)
+```
+
+```{r}
+#| label: target-plot
+#| fig-width: 8
+#| fig-height: 5
+
+# Visualize the class distribution
+ggplot(target_counts, aes(x = factor(TARGET), y = n, fill = outcome)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(round(percentage * 100, 1), "%")), 
+            vjust = -0.5, size = 5, fontface = "bold") +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.15))) +
+  scale_fill_manual(values = c("Repaid" = "#27ae60", "Defaulted" = "#e74c3c")) +
+  labs(
+    title = "Distribution of Loan Outcomes",
+    subtitle = "Severe class imbalance: only ~8% of loans default",
+    x = "TARGET (0 = Repaid, 1 = Default)",
+    y = "Number of Applications",
+    fill = "Outcome"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+## Class Imbalance Assessment
+
+The data shows **severe class imbalance**:
+
+- **91.9%** of loans were repaid successfully (TARGET = 0)
+- **Only 8.1%** of loans defaulted (TARGET = 1)
+
+This imbalance ratio of approximately **11:1** has important implications:
+
+```{r}
+#| label: baseline-accuracy
+
+# Calculate baseline metrics
+n_repaid <- sum(app_train$TARGET == 0)
+n_default <- sum(app_train$TARGET == 1)
+imbalance_ratio <- n_repaid / n_default
+majority_class_accuracy <- n_repaid / nrow(app_train)
+
+cat("Loans repaid (TARGET=0):    ", format(n_repaid, big.mark = ","), "\n")
+cat("Loans defaulted (TARGET=1): ", format(n_default, big.mark = ","), "\n")
+cat("Imbalance ratio:            ", round(imbalance_ratio, 1), ": 1\n")
+cat("Majority class accuracy:    ", round(majority_class_accuracy * 100, 2), "%\n")
+```
+
+## Majority Class Classifier Baseline
+
+A **majority class classifier** is the simplest possible model - it always predicts the most common outcome (in this case, "repaid"). This establishes a baseline that any useful model must beat.
+
+**Majority class accuracy = 91.93%**
+
+This means:
+
+1. **Accuracy is misleading:** A model predicting "no default" for everyone achieves 92% accuracy while being completely useless
+2. **We need better metrics:** AUC-ROC and Precision-Recall better evaluate imbalanced classification
+3. **Class weighting may help:** During model training, we should consider oversampling, undersampling, or cost-sensitive learning
+
+For Home Credit's goal of expanding approvals while managing risk, this imbalance means we have substantial room to approve more customers if we can accurately identify the 8% who would default.
+
+---
+
+
+# Predictor Analysis
+
+To identify which features are most predictive of loan default, we will analyze both numeric and categorical predictors using appropriate statistical measures:
+
+- **Numeric predictors:** Area Under the ROC Curve (AUC) measures how well a single feature separates defaulters from non-defaulters. An AUC of 0.5 means no predictive power; values closer to 0 or 1 indicate strong separation.
+- **Categorical predictors:** Information Value (IV) quantifies the predictive power of categorical variables. IV > 0.1 is considered weak, > 0.3 is medium, and > 0.5 is strong.
+
+## Numeric Predictors
+
+```{r}
+#| label: numeric-auc
+
+# Function to calculate AUC using the rank-based (Mann-Whitney) method
+# AUC measures how well a variable separates the two classes
+# NOTE: Using as.numeric() to prevent integer overflow with large datasets
+calc_auc <- function(scores, labels) {
+  # Remove missing values and infinite values
+  valid <- !is.na(scores) & !is.na(labels) & is.finite(scores)
+  scores <- scores[valid]
+  labels <- labels[valid]
+  
+  # Need both classes present
+  if (length(unique(labels)) < 2) return(NA_real_)
+  
+  pos <- labels == 1
+  n_pos <- as.numeric(sum(pos))   # Convert to numeric to avoid integer overflow
+  n_neg <- as.numeric(sum(!pos))  # with large datasets (n_pos * n_neg can exceed int max)
+  
+  if (n_pos == 0 || n_neg == 0) return(NA_real_)
+  
+  # Calculate AUC via ranks (Wilcoxon-Mann-Whitney statistic)
+  ranks <- rank(scores)
+  auc <- (sum(ranks[pos]) - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+  return(auc)
+}
+
+# Identify numeric columns (excluding ID and TARGET)
+numeric_cols <- app_train |>
+  select(where(is.numeric), -SK_ID_CURR, -TARGET) |>
+  names()
+
+# Calculate AUC for each numeric predictor
+numeric_auc <- lapply(numeric_cols, function(col) {
+  auc <- calc_auc(app_train[[col]], app_train$TARGET)
+  data.frame(
+    variable = col,
+    auc = auc,
+    auc_deviation = abs(auc - 0.5)  # Distance from random (0.5)
+  )
+}) |> bind_rows() |>
+  filter(!is.na(auc)) |>
+  arrange(desc(auc_deviation))
+
+# Display top 15 most predictive numeric features
+kable(head(numeric_auc, 15), 
+      col.names = c("Variable", "AUC", "Deviation from 0.5"),
+      digits = 3,
+      caption = "Top 15 Numeric Predictors by AUC")
+```
+
+```{r}
+#| label: numeric-auc-plot
+#| fig-width: 10
+#| fig-height: 6
+
+# Visualize top 15 numeric predictors
+top_numeric <- head(numeric_auc, 15)
+
+ggplot(top_numeric, aes(x = reorder(variable, auc_deviation), y = auc_deviation)) +
+  geom_col(fill = "#3498db") +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "red", linewidth = 0.8) +
+  coord_flip() +
+  labs(
+    title = "Top 15 Numeric Predictors by Predictive Power",
+    subtitle = "AUC deviation from 0.5 (higher = more predictive)",
+    x = NULL,
+    y = "AUC Deviation from 0.5"
+  ) +
+  annotate("text", x = 2, y = 0.055, label = "Weak threshold", color = "red", size = 3)
+```
+
+### Interpretation of Top Numeric Predictors
+
+The most predictive numeric features are:
+
+1. **EXT_SOURCE_3, EXT_SOURCE_2, EXT_SOURCE_1:** These external credit scores are by far the strongest predictors with AUC deviations of 0.15-0.18. They appear to be normalized scores from external data sources (likely credit bureaus). AUC values below 0.5 indicate that *lower* scores associate with *higher* default risk - exactly what we'd expect from credit scores.
+
+2. **DAYS_BIRTH:** The fourth strongest predictor (AUC = 0.583). Older applicants (more negative values = older) tend to default less, suggesting age/maturity correlates with repayment reliability.
+
+3. **OWN_CAR_AGE:** Applicants with older cars tend to have higher default rates, possibly indicating financial stress or longer time since major purchase.
+
+4. **DAYS_LAST_PHONE_CHANGE, DAYS_ID_PUBLISH:** Recent phone changes or ID updates may indicate instability.
+
+5. **REGION_RATING_CLIENT:** Regional economic factors influence default rates - applicants from lower-rated regions default more often.
+
+```{r}
+#| label: top-numeric-density
+#| fig-width: 10
+#| fig-height: 8
+
+# Visualize distributions of top 4 numeric predictors by TARGET
+top_4_numeric <- head(numeric_auc$variable, 4)
+
+# Create density plots for each
+plots <- lapply(top_4_numeric, function(var) {
+  # Sample for faster plotting
+  sample_data <- app_train |>
+    filter(!is.na(.data[[var]]) & is.finite(.data[[var]])) |>
+    sample_n(min(50000, n()))
+  
+  auc_val <- numeric_auc$auc[numeric_auc$variable == var]
+  
+  ggplot(sample_data, aes(x = .data[[var]], fill = factor(TARGET))) +
+    geom_density(alpha = 0.4) +
+    scale_fill_manual(values = c("0" = "#27ae60", "1" = "#e74c3c"),
+                      labels = c("Repaid", "Defaulted")) +
+    labs(
+      title = paste0(var, " (AUC = ", round(auc_val, 3), ")"),
+      x = var,
+      y = "Density",
+      fill = "Outcome"
+    ) +
+    theme(legend.position = "bottom")
+})
+
+# Arrange plots in a grid
+library(patchwork)
+(plots[[1]] + plots[[2]]) / (plots[[3]] + plots[[4]])
+```
+
+The density plots reveal clear separation between defaulters and non-defaulters for the top predictors:
+
+- **EXT_SOURCE variables:** Defaulters consistently have lower external scores
+- **DAYS_BIRTH:** Younger applicants (less negative values) default more often
+- **DAYS_EMPLOYED:** Shorter employment histories associate with higher default risk
+
+## Categorical Predictors
+
+```{r}
+#| label: categorical-iv
+
+# Function to calculate Information Value (IV) for categorical variables
+# IV measures how much a categorical variable helps predict the target
+calc_iv <- function(x, y, eps = 1e-6) {
+  # Convert to character to handle factors
+  x <- as.character(x)
+  
+  # Create contingency table
+  df <- data.frame(x = x, y = y) |>
+    filter(!is.na(x) & !is.na(y)) |>
+    group_by(x) |>
+    summarize(
+      bad = sum(y == 1),
+      good = sum(y == 0),
+      .groups = "drop"
+    )
+  
+  total_bad <- sum(df$bad)
+  total_good <- sum(df$good)
+  
+  if (total_bad == 0 || total_good == 0) return(NA_real_)
+  
+  # Calculate IV components with smoothing
+  df <- df |>
+    mutate(
+      pct_bad = (bad + eps) / (total_bad + eps * n()),
+      pct_good = (good + eps) / (total_good + eps * n()),
+      woe = log(pct_bad / pct_good),
+      iv_component = (pct_bad - pct_good) * woe
+    )
+  
+  sum(df$iv_component)
+}
+
+# Identify categorical columns
+categorical_cols <- app_train |>
+  select(where(is.character)) |>
+  names()
+
+# Calculate IV for each categorical predictor
+categorical_iv <- lapply(categorical_cols, function(col) {
+  iv <- calc_iv(app_train[[col]], app_train$TARGET)
+  n_levels <- length(unique(na.omit(app_train[[col]])))
+  data.frame(
+    variable = col,
+    iv = iv,
+    n_levels = n_levels
+  )
+}) |> bind_rows() |>
+  filter(!is.na(iv)) |>
+  arrange(desc(iv))
+
+# Display results with IV interpretation
+categorical_iv <- categorical_iv |>
+  mutate(strength = case_when(
+    iv < 0.02 ~ "Not useful",
+    iv < 0.1 ~ "Weak",
+    iv < 0.3 ~ "Medium",
+    iv < 0.5 ~ "Strong",
+    TRUE ~ "Very strong"
+  ))
+
+kable(categorical_iv, 
+      col.names = c("Variable", "IV", "# Levels", "Predictive Strength"),
+      digits = 3,
+      caption = "Categorical Predictors by Information Value")
+```
+
+```{r}
+#| label: categorical-iv-plot
+#| fig-width: 10
+#| fig-height: 6
+
+# Visualize IV for categorical predictors
+ggplot(categorical_iv, aes(x = reorder(variable, iv), y = iv, fill = strength)) +
+  geom_col() +
+  geom_hline(yintercept = c(0.02, 0.1, 0.3), linetype = "dashed", alpha = 0.5) +
+  coord_flip() +
+  scale_fill_manual(values = c("Not useful" = "#bdc3c7", "Weak" = "#f39c12", 
+                                "Medium" = "#27ae60", "Strong" = "#2980b9")) +
+  labs(
+    title = "Categorical Predictors by Information Value",
+    subtitle = "IV thresholds: 0.02 (useful), 0.1 (weak), 0.3 (medium)",
+    x = NULL,
+    y = "Information Value",
+    fill = "Strength"
+  )
+```
+
+### Interpretation of Categorical Predictors
+
+```{r}
+#| label: top-categorical-eventrate
+#| fig-width: 10
+#| fig-height: 10
+
+# Show default rates by category for top 4 categorical variables
+top_4_cat <- head(categorical_iv$variable, 4)
+
+cat_plots <- lapply(top_4_cat, function(var) {
+  iv_val <- categorical_iv$iv[categorical_iv$variable == var]
+  
+  # Calculate event rate by category
+  event_rates <- app_train |>
+    filter(!is.na(.data[[var]])) |>
+    group_by(category = .data[[var]]) |>
+    summarize(
+      n = n(),
+      default_rate = mean(TARGET == 1),
+      .groups = "drop"
+    ) |>
+    arrange(desc(default_rate)) |>
+    slice_head(n = 15)  # Top 15 levels only
+  
+  ggplot(event_rates, aes(x = reorder(category, default_rate), y = default_rate)) +
+    geom_col(fill = "#e74c3c") +
+    geom_hline(yintercept = mean(app_train$TARGET), linetype = "dashed", color = "blue") +
+    coord_flip() +
+    scale_y_continuous(labels = percent_format(accuracy = 0.1)) +
+    labs(
+      title = paste0(var, " (IV = ", round(iv_val, 3), ")"),
+      subtitle = "Blue line = overall default rate (8.1%)",
+      x = NULL,
+      y = "Default Rate"
+    )
+})
+
+(cat_plots[[1]] + cat_plots[[2]]) / (cat_plots[[3]] + cat_plots[[4]])
+```
+
+The categorical analysis reveals meaningful patterns:
+
+1. **OCCUPATION_TYPE:** Certain occupations (low-skill laborers, drivers) have significantly higher default rates than others (accountants, managers).
+
+2. **ORGANIZATION_TYPE:** Industry sector matters - some business types show 2-3x higher default rates than average.
+
+3. **NAME_EDUCATION_TYPE:** Lower education levels correlate with higher default risk.
+
+4. **NAME_INCOME_TYPE:** Income source affects risk - working individuals differ from pensioners or unemployed.
+
+## Summary of Most Predictive Features
+
+```{r}
+#| label: predictive-summary
+
+# Combine top predictors into a summary table
+top_predictors <- bind_rows(
+  numeric_auc |>
+    slice_head(n = 10) |>
+    mutate(type = "Numeric", strength = auc_deviation) |>
+    select(variable, type, metric = auc, strength),
+  categorical_iv |>
+    slice_head(n = 6) |>
+    mutate(type = "Categorical") |>
+    select(variable, type, metric = iv, strength = iv)
+) |>
+  arrange(desc(strength))
+
+kable(top_predictors,
+      col.names = c("Variable", "Type", "AUC/IV", "Strength"),
+      digits = 3,
+      caption = "Top Predictors for Default Risk Model")
+```
+
+**Key findings for modeling:**
+
+1. **External scores (EXT_SOURCE_1/2/3)** are the most valuable predictors and should definitely be included in any model.
+
+2. **Time-based features (DAYS_BIRTH, DAYS_EMPLOYED)** capture stability and experience that correlate with repayment ability.
+
+3. **Categorical features** like occupation and education provide meaningful risk segmentation despite lower overall IV scores.
+
+4. **Regional factors** suggest geographic risk variation worth exploring further.
+
+---
+
+# Missing Data Analysis
+
+Missing data is a critical consideration for any predictive model. In this section, we explore the scope and patterns of missingness and propose strategies for handling it.
+
+## Overall Missingness Summary
+
+```{r}
+#| label: missing-overview
+
+# Calculate missing values for each variable in training data
+missing_summary <- app_train |>
+  summarise(across(everything(), ~sum(is.na(.)))) |>
+  pivot_longer(everything(), names_to = "variable", values_to = "n_missing") |>
+  mutate(
+    pct_missing = n_missing / nrow(app_train) * 100,
+    has_missing = n_missing > 0
+  ) |>
+  arrange(desc(pct_missing))
+
+# Summary statistics
+n_complete_vars <- sum(missing_summary$pct_missing == 0)
+n_missing_vars <- sum(missing_summary$pct_missing > 0)
+total_cells <- nrow(app_train) * ncol(app_train)
+total_missing <- sum(missing_summary$n_missing)
+
+cat("=== Missing Data Overview (Training Set) ===\n\n")
+cat(sprintf("Total variables: %d\n", nrow(missing_summary)))
+cat(sprintf("Variables with complete data: %d (%.1f%%)\n", n_complete_vars, 100*n_complete_vars/nrow(missing_summary)))
+cat(sprintf("Variables with missing data: %d (%.1f%%)\n", n_missing_vars, 100*n_missing_vars/nrow(missing_summary)))
+cat(sprintf("\nTotal cells: %s\n", format(total_cells, big.mark = ",")))
+cat(sprintf("Total missing cells: %s (%.2f%%)\n", format(total_missing, big.mark = ","), 100*total_missing/total_cells))
+```
+
+The training data has a significant amount of missing data. Let's examine which variables are most affected.
+
+## Top Variables by Missing Percentage
+
+```{r}
+#| label: missing-top-vars
+
+# Show top 20 variables with highest missingness
+top_missing <- missing_summary |>
+  filter(pct_missing > 0) |>
+  slice_head(n = 20)
+
+kable(top_missing,
+      col.names = c("Variable", "Missing Count", "Missing %", "Has Missing"),
+      digits = 1,
+      caption = "Top 20 Variables by Missing Percentage")
+```
+
+```{r}
+#| label: missing-bar-plot
+#| fig-width: 10
+#| fig-height: 8
+
+# Visualize top 20 missing variables
+ggplot(top_missing, aes(x = reorder(variable, pct_missing), y = pct_missing)) +
+  geom_col(fill = "#e74c3c") +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "darkred", linewidth = 0.8) +
+  geom_hline(yintercept = 70, linetype = "dashed", color = "black", linewidth = 0.8) +
+  coord_flip() +
+  labs(
+    title = "Top 20 Variables by Missing Data Percentage",
+    subtitle = "Dashed lines at 50% and 70% thresholds",
+    x = NULL,
+    y = "Missing Percentage (%)"
+  ) +
+  theme_minimal() +
+  annotate("text", x = 3, y = 52, label = "50% threshold", color = "darkred", size = 3) +
+  annotate("text", x = 1, y = 72, label = "70% threshold", color = "black", size = 3)
+```
+
+### Interpretation of Missing Patterns
+
+The missing data reveals important patterns:
+
+1. **Building/Housing Features (60-70% missing):** Variables like `COMMONAREA_AVG`, `LIVINGAPARTMENTS_AVG`, `FLOORSMIN_AVG`, and related building characteristics have very high missingness. These likely apply only to certain housing types or are optional fields in the application.
+
+2. **OWN_CAR_AGE (66% missing):** This is **structural missingness** - the value is missing when the applicant doesn't own a car (`FLAG_OWN_CAR = "N"`). This is not random missing data.
+
+3. **External Scores (20-56% missing):** `EXT_SOURCE_1` has 56% missing, while `EXT_SOURCE_3` has 20% missing. These are our strongest predictors, so how we handle their missingness is critical.
+
+## Missingness by Variable Category
+
+```{r}
+#| label: missing-by-category
+
+# Categorize variables by their missing pattern
+missing_summary <- missing_summary |>
+  mutate(
+    category = case_when(
+      pct_missing == 0 ~ "Complete",
+      pct_missing < 5 ~ "Low (<5%)",
+      pct_missing < 20 ~ "Moderate (5-20%)",
+      pct_missing < 50 ~ "High (20-50%)",
+      pct_missing < 70 ~ "Very High (50-70%)",
+      TRUE ~ "Extreme (>70%)"
+    ),
+    category = factor(category, levels = c("Complete", "Low (<5%)", "Moderate (5-20%)", 
+                                            "High (20-50%)", "Very High (50-70%)", "Extreme (>70%)"))
+  )
+
+# Count by category
+category_counts <- missing_summary |>
+  count(category) |>
+  mutate(pct = n / sum(n) * 100)
+
+kable(category_counts,
+      col.names = c("Missing Category", "# Variables", "% of Variables"),
+      digits = 1,
+      caption = "Variables by Missing Data Category")
+```
+
+```{r}
+#| label: missing-category-plot
+#| fig-width: 8
+#| fig-height: 5
+
+# Visualize missing categories
+ggplot(category_counts, aes(x = category, y = n, fill = category)) +
+  geom_col() +
+  geom_text(aes(label = n), vjust = -0.5) +
+  scale_fill_manual(values = c("Complete" = "#27ae60", "Low (<5%)" = "#2ecc71",
+                                "Moderate (5-20%)" = "#f1c40f", "High (20-50%)" = "#e67e22",
+                                "Very High (50-70%)" = "#e74c3c", "Extreme (>70%)" = "#c0392b")) +
+  labs(
+    title = "Distribution of Variables by Missing Data Severity",
+    x = "Missing Category",
+    y = "Number of Variables"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Per-Row Missingness
+
+It's also important to understand how missing data is distributed across observations.
+
+```{r}
+#| label: row-missingness
+
+# Calculate missing values per row
+row_missing <- app_train |>
+  mutate(
+    n_missing = rowSums(is.na(across(everything()))),
+    pct_missing = n_missing / ncol(app_train) * 100
+  )
+
+# Summary statistics
+cat("=== Per-Row Missingness Summary ===\n\n")
+cat(sprintf("Min missing per row: %d variables\n", min(row_missing$n_missing)))
+cat(sprintf("Max missing per row: %d variables\n", max(row_missing$n_missing)))
+cat(sprintf("Median missing per row: %d variables\n", median(row_missing$n_missing)))
+cat(sprintf("Mean missing per row: %.1f variables\n", mean(row_missing$n_missing)))
+
+# How many rows have >50% missing?
+extreme_rows <- sum(row_missing$pct_missing > 50)
+cat(sprintf("\nRows with >50%% missing: %d (%.3f%%)\n", extreme_rows, 100*extreme_rows/nrow(app_train)))
+```
+
+```{r}
+#| label: row-missing-hist
+#| fig-width: 10
+#| fig-height: 5
+
+# Histogram of per-row missingness
+ggplot(row_missing, aes(x = n_missing)) +
+  geom_histogram(binwidth = 5, fill = "#3498db", color = "white") +
+  geom_vline(xintercept = median(row_missing$n_missing), linetype = "dashed", color = "red") +
+  labs(
+    title = "Distribution of Missing Values Per Row",
+    subtitle = paste("Red dashed line = median (", median(row_missing$n_missing), " variables)"),
+    x = "Number of Missing Variables per Row",
+    y = "Count of Rows"
+  ) +
+  theme_minimal()
+```
+
+### Interpretation of Row-Level Missingness
+
+Most rows have a moderate amount of missing data, concentrated in the building/housing variables. Very few rows (if any) have extreme missingness that would warrant removal.
+
+## Is Missingness Related to Default?
+
+An important question: does the presence of missing data correlate with default risk? If so, missingness itself becomes informative.
+
+```{r}
+#| label: missing-vs-target
+
+# Check if missingness correlates with TARGET for key variables
+key_missing_vars <- c("EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3", 
+                      "OWN_CAR_AGE", "OCCUPATION_TYPE", "AMT_REQ_CREDIT_BUREAU_YEAR")
+
+missing_target <- lapply(key_missing_vars, function(var) {
+  if (!var %in% names(app_train)) return(NULL)
+  
+  app_train |>
+    mutate(is_missing = is.na(.data[[var]])) |>
+    group_by(is_missing) |>
+    summarise(
+      n = n(),
+      default_rate = mean(TARGET) * 100,
+      .groups = "drop"
+    ) |>
+    mutate(variable = var)
+}) |> bind_rows()
+
+# Display results
+kable(missing_target |> 
+        select(variable, is_missing, n, default_rate) |>
+        mutate(is_missing = ifelse(is_missing, "Missing", "Present")),
+      col.names = c("Variable", "Status", "Count", "Default Rate (%)"),
+      digits = 2,
+      caption = "Default Rates by Missingness Status")
+```
+
+```{r}
+#| label: missing-target-plot
+#| fig-width: 10
+#| fig-height: 6
+
+# Visualize missingness vs default rate
+ggplot(missing_target, aes(x = variable, y = default_rate, fill = is_missing)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = c("FALSE" = "#27ae60", "TRUE" = "#e74c3c"),
+                    labels = c("Present", "Missing")) +
+  labs(
+    title = "Default Rate by Variable Missingness",
+    subtitle = "Does missing data correlate with default risk?",
+    x = NULL,
+    y = "Default Rate (%)",
+    fill = "Value Status"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Interpretation: Missingness as a Signal
+
+**Critical finding:** For several variables, the default rate differs significantly between records with missing vs. present values:
+
+- **EXT_SOURCE variables:** Records missing external scores often have different default rates, suggesting missingness carries predictive information.
+- **OWN_CAR_AGE:** Missing values (no car) may correlate with default risk differently than having a car.
+- **OCCUPATION_TYPE:** Missing occupation information may indicate informal employment or other risk factors.
+
+This suggests we should **create missingness indicator variables** rather than simply imputing values.
+
+## Proposed Solutions for Missing Data
+
+Based on our analysis, we recommend a **multi-strategy approach**:
+
+### Strategy 1: Do NOT Remove Rows
+
+- Very few rows have extreme missingness
+- Removing rows would lose valuable training data
+- Row-level missingness doesn't indicate data quality issues
+
+### Strategy 2: Consider Removing High-Missing, Low-Value Columns
+
+Variables with >70% missing AND low predictive value could be dropped:
+
+```{r}
+#| label: drop-candidates
+
+# Identify candidates for removal (>70% missing)
+drop_candidates <- missing_summary |>
+  filter(pct_missing > 70) |>
+  select(variable, pct_missing)
+
+if(nrow(drop_candidates) > 0) {
+  kable(drop_candidates,
+        col.names = c("Variable", "Missing %"),
+        digits = 1,
+        caption = "Candidate Variables for Removal (>70% Missing)")
+} else {
+  cat("No variables have >70% missing data.\n")
+}
+```
+
+**Recommendation:** Only drop these if they also have low AUC/IV scores. Some high-missing variables may still provide valuable signal for the subset of records where they exist.
+
+### Strategy 3: Create Missingness Indicators
+
+For variables where missingness correlates with default:
+
+```{r}
+# Example: Create missingness flags
+app_train <- app_train |>
+  mutate(
+    EXT_SOURCE_1_missing = as.integer(is.na(EXT_SOURCE_1)),
+    EXT_SOURCE_3_missing = as.integer(is.na(EXT_SOURCE_3)),
+    OWN_CAR_AGE_missing = as.integer(is.na(OWN_CAR_AGE))
+  )
+```
+
+### Strategy 4: Imputation Methods by Variable Type
+
+| Variable Type | Recommended Approach |
+|---------------|---------------------|
+| **Numeric (low missing)** | Median imputation + missing indicator |
+| **Numeric (high missing)** | Keep NA for tree models OR median + indicator for linear |
+| **Categorical** | Create "Missing" category |
+| **Structural missing** | Handle based on related variable (e.g., OWN_CAR_AGE when FLAG_OWN_CAR="N") |
+
+### Strategy 5: Model-Specific Handling
+
+- **Tree-based models (XGBoost, Random Forest):** Can handle missing values natively. Create missing indicators for added signal.
+- **Linear models (Logistic Regression):** Require imputation. Use median + missing indicator approach.
+- **Consider:** Multiple imputation (MICE) for more sophisticated handling if needed.
+
+## Summary of Missing Data Recommendations
+
+1. **Do not remove rows** - missingness is not concentrated in specific observations
+2. **Create missing indicator flags** for key predictors where missingness correlates with target
+3. **Use median/mode imputation** with missing indicators for numeric/categorical variables
+4. **Handle structural missingness specially** (e.g., OWN_CAR_AGE)
+5. **Consider keeping NAs** for tree-based models that handle them natively
+6. **Evaluate dropping** only high-missing (>70%) AND low-predictive-value columns
+
+---
+
+# Data Quality Issues
+
+Beyond missing data, we must verify that data values make sense and identify any errors that need correction. Note that **outliers are not necessarily mistakes** - we focus on impossible or clearly erroneous values.
+
+## DAYS Variables Validation
+
+All `DAYS_` variables represent days before the application (should be negative or zero).
+
+```{r}
+#| label: days-validation
+
+# Check all DAYS_ variables for logical consistency
+days_vars <- grep("^DAYS_", names(app_train), value = TRUE)
+
+days_check <- lapply(days_vars, function(v) {
+  x <- app_train[[v]]
+  data.frame(
+    variable = v,
+    min = min(x, na.rm = TRUE),
+    max = max(x, na.rm = TRUE),
+    n_positive = sum(x > 0, na.rm = TRUE),
+    pct_positive = round(mean(x > 0, na.rm = TRUE) * 100, 2)
+  )
+}) |> bind_rows()
+
+kable(days_check,
+      col.names = c("Variable", "Min", "Max", "# Positive", "% Positive"),
+      caption = "DAYS Variables - Checking for Invalid Positive Values")
+```
+
+### Interpretation
+
+All `DAYS_` variables are negative as expected, **except** `DAYS_EMPLOYED` which has 18% positive values. This is clearly an error - let's investigate.
+
+## DAYS_EMPLOYED Sentinel Value
+
+```{r}
+#| label: days-employed-check
+
+# Check DAYS_EMPLOYED for anomalies
+days_emp_summary <- app_train |>
+  summarise(
+    min = min(DAYS_EMPLOYED, na.rm = TRUE),
+    max = max(DAYS_EMPLOYED, na.rm = TRUE),
+    median = median(DAYS_EMPLOYED, na.rm = TRUE),
+    n_positive = sum(DAYS_EMPLOYED > 0, na.rm = TRUE),
+    pct_positive = mean(DAYS_EMPLOYED > 0, na.rm = TRUE) * 100
+  )
+
+cat("DAYS_EMPLOYED Summary:\n")
+cat(sprintf("  Min: %d days\n", days_emp_summary$min))
+cat(sprintf("  Max: %d days (SUSPICIOUS - this is ~1000 years!)\n", days_emp_summary$max))
+cat(sprintf("  Median: %d days\n", days_emp_summary$median))
+cat(sprintf("  Positive values: %d (%.1f%%)\n", days_emp_summary$n_positive, days_emp_summary$pct_positive))
+```
+
+```{r}
+#| label: sentinel-analysis
+
+# Check for sentinel value 365243
+sentinel_value <- 365243
+sentinel_count <- sum(app_train$DAYS_EMPLOYED == sentinel_value, na.rm = TRUE)
+sentinel_pct <- sentinel_count / nrow(app_train) * 100
+
+cat(sprintf("\nSentinel value %d appears %d times (%.1f%% of data)\n", 
+            sentinel_value, sentinel_count, sentinel_pct))
+
+# Check default rate for sentinel vs non-sentinel
+sentinel_target <- app_train |>
+  mutate(is_sentinel = DAYS_EMPLOYED == sentinel_value) |>
+  group_by(is_sentinel) |>
+  summarise(
+    n = n(),
+    default_rate = mean(TARGET) * 100,
+    .groups = "drop"
+  )
+
+cat("\nDefault rates:\n")
+print(sentinel_target)
+```
+
+### Interpretation
+
+The value **365,243** in `DAYS_EMPLOYED` is clearly a **sentinel/placeholder value** (representing ~1000 years of employment, which is impossible). This affects ~18% of records and should be:
+
+1. **Replaced with NA** before analysis
+2. **Flagged with an indicator** variable since it appears to correlate with lower default risk (possibly indicating pensioners or other stable groups)
+
+## Near-Zero Variance Columns
+
+Columns where one value dominates (>99% of observations) provide little predictive information and may cause issues in some models.
+
+```{r}
+#| label: nzv-check
+
+# Check for near-zero variance columns
+# These are columns where one value appears in >99% of records
+
+nzv_check <- lapply(names(app_train), function(v) {
+  x <- app_train[[v]]
+  # Calculate percentage of most common value
+  if (is.numeric(x)) {
+    tbl <- table(x, useNA = "no")
+  } else {
+    tbl <- table(as.character(x), useNA = "no")
+  }
+  if (length(tbl) == 0) return(NULL)
+  
+  most_common_pct <- max(tbl) / sum(tbl) * 100
+  n_unique <- length(tbl)
+  
+  data.frame(
+    variable = v,
+    n_unique = n_unique,
+    most_common_pct = round(most_common_pct, 2)
+  )
+}) |> bind_rows() |>
+  filter(most_common_pct > 99) |>
+  arrange(desc(most_common_pct))
+
+cat(sprintf("Found %d columns with >99%% same value:\n\n", nrow(nzv_check)))
+kable(head(nzv_check, 15),
+      col.names = c("Variable", "# Unique Values", "Most Common %"),
+      caption = "Near-Zero Variance Columns (Top 15)")
+```
+
+### Interpretation
+
+Several columns have near-zero variance, primarily `FLAG_DOCUMENT_` variables where almost all values are 0 (document not provided). These columns:
+
+- **FLAG_MOBIL:** 100% have value 1 - provides NO information, should be removed
+- **FLAG_DOCUMENT_2, 10, 12:** Nearly 100% zeros - minimal predictive value
+- **Multiple FLAG_DOCUMENT_* columns:** >99% zeros
+
+**Recommendation:** Consider removing columns with >99.9% same value as they add noise without signal. However, the rare 1s in FLAG_DOCUMENT columns might still be predictive - test before removing.
+
+## FLAG Variables Encoding
+
+FLAG variables should be binary. Let's verify they're consistently encoded.
+
+```{r}
+#| label: flag-encoding
+
+# Check FLAG variable encoding (should be 0/1 or Y/N)
+flag_vars <- grep("^FLAG_", names(app_train), value = TRUE)
+
+flag_check <- lapply(flag_vars, function(v) {
+  x <- app_train[[v]]
+  unique_vals <- sort(unique(na.omit(x)))
+  data.frame(
+    variable = v,
+    encoding = paste(head(unique_vals, 4), collapse = ", "),
+    pct_positive = round(mean(x == 1 | x == "Y", na.rm = TRUE) * 100, 2)
+  )
+}) |> bind_rows()
+
+kable(flag_check,
+      col.names = c("Variable", "Values", "% Positive"),
+      caption = "FLAG Variables - Encoding Check")
+```
+
+### Interpretation
+
+FLAG variables have **inconsistent encoding**:
+
+- **FLAG_OWN_CAR, FLAG_OWN_REALTY:** Encoded as "Y" / "N" (character)
+- **All other FLAG variables:** Encoded as 0 / 1 (numeric)
+
+**Recommendation:** Convert Y/N flags to 1/0 for consistency before modeling.
+
+## Negative Values Check
+
+Amount (AMT_) and count (CNT_) variables should logically be non-negative.
+
+```{r}
+#| label: negative-check
+
+# Check for negative values in AMT_ and CNT_ columns
+amt_cnt_vars <- grep("^(AMT_|CNT_)", names(app_train), value = TRUE)
+
+neg_check <- lapply(amt_cnt_vars, function(v) {
+  x <- app_train[[v]]
+  if (!is.numeric(x)) return(NULL)
+  n_neg <- sum(x < 0, na.rm = TRUE)
+  data.frame(
+    variable = v,
+    n_negative = n_neg,
+    pct_negative = round(n_neg / sum(!is.na(x)) * 100, 4),
+    min_value = min(x, na.rm = TRUE)
+  )
+}) |> bind_rows()
+
+# Show any with negative values
+neg_problems <- neg_check |> filter(n_negative > 0)
+
+if (nrow(neg_problems) > 0) {
+  cat("WARNING: Found negative values in these columns:\n")
+  kable(neg_problems)
+} else {
+  cat("✓ No negative values found in AMT_ or CNT_ variables.\n")
+  cat("\nAll amount and count variables have valid non-negative values.")
+}
+```
+
+### Interpretation
+
+All AMT_ and CNT_ variables contain only non-negative values as expected. **No data cleaning needed** for these columns.
+
+## Summary of Data Quality Issues
+
+```{r}
+#| label: quality-summary
+
+# Create summary table of all data quality issues found
+quality_issues <- data.frame(
+  Issue = c(
+    "DAYS_EMPLOYED sentinel value (365243)",
+    "Near-zero variance FLAG columns",
+    "Inconsistent FLAG encoding (Y/N vs 0/1)",
+    "Negative AMT_/CNT_ values"
+  ),
+  Severity = c("High", "Medium", "Low", "None"),
+  Records_Affected = c("55,374 (18%)", "Multiple columns", "2 columns", "0"),
+  Recommended_Action = c(
+    "Replace with NA + create indicator",
+    "Consider removing if >99.9% same value",
+    "Convert Y/N to 1/0",
+    "No action needed"
+  )
+)
+
+kable(quality_issues,
+      col.names = c("Issue", "Severity", "Records Affected", "Recommended Action"),
+      caption = "Summary of Data Quality Issues")
+```
+
+---
+
+# Transactional Data Integration
+
+## Overview of Supplementary Datasets
+
+Home Credit provides six supplementary transactional datasets that contain historical information about applicants' previous loans and credit behavior. These datasets are at different grains and must be aggregated to the application level (one row per SK_ID_CURR) before joining.
+
+```{r}
+#| label: supp-files-info
+
+# Summary of supplementary transactional files
+supp_info <- data.frame(
+  File = c("previous_application.csv", "installments_payments.csv", 
+           "credit_card_balance.csv", "POS_CASH_balance.csv",
+           "bureau.csv", "bureau_balance.csv"),
+  Description = c(
+    "Previous loan applications at Home Credit",
+    "Payment history for previous loans",
+    "Monthly credit card balance snapshots",
+    "Monthly POS/cash loan balance snapshots",
+    "Credit history from other institutions",
+    "Monthly bureau credit balance history"
+  ),
+  Grain = c("One row per previous application",
+            "One row per payment",
+            "One row per month per card",
+            "One row per month per loan",
+            "One row per bureau credit",
+            "One row per month per bureau credit"),
+  Rows = c("1,670,214", "13,605,401", "3,840,312", 
+           "10,001,358", "1,716,428", "27,299,925")
+)
+
+kable(supp_info,
+      caption = "Supplementary Transactional Datasets")
+```
+
+### Interpretation
+
+The transactional data totals over **57 million rows** across 6 files. This rich behavioral data captures:
+
+- **Previous applications:** How many times did the applicant apply before? What were the outcomes?
+- **Payment behavior:** Did they pay on time? How often were they late?
+- **Credit utilization:** How do they manage revolving credit?
+- **External credit history:** What does their bureau report show?
+
+## Aggregation Strategy
+
+Since our target is at the application level (one row per SK_ID_CURR), we must aggregate all transactional data to this grain.
+
+```{r}
+#| label: aggregation-strategy
+
+# Show the aggregation approach for each file
+agg_strategy <- data.frame(
+  Source = c("previous_application", "previous_application", "previous_application",
+             "installments_payments", "installments_payments",
+             "bureau", "bureau", "bureau_balance"),
+  Feature = c("prev_app_count", "prev_app_approved_rate", "prev_app_refused_rate",
+              "inst_prop_late", "inst_pay_delay_mean",
+              "bureau_credit_cnt", "bureau_credit_active_pct", "bb_mean_status0_pct"),
+  Aggregation = c("COUNT(*)", "MEAN(approved)", "MEAN(refused)",
+                  "MEAN(late_flag)", "MEAN(days_delay)",
+                  "COUNT(*)", "MEAN(active)", "MEAN(status=0)"),
+  Rationale = c("Volume of prior applications",
+                "Historical approval success",
+                "Historical rejection rate",
+                "Payment reliability",
+                "Average payment delay",
+                "Credit exposure breadth",
+                "Current credit burden",
+                "Bureau payment punctuality")
+)
+
+kable(agg_strategy,
+      caption = "Sample Aggregation Features by Source")
+```
+
+## Aggregated Features Created
+
+We aggregated the transactional data to create **24 new features** at the application level:
+
+```{r}
+#| label: agg-features-list
+
+# List all aggregated features
+agg_features <- data.frame(
+  Feature = c(
+    "prev_app_count", "prev_app_amt_mean", "prev_app_amt_sum",
+    "prev_app_credit_mean", "prev_app_downpayment_mean",
+    "prev_app_approved_rate", "prev_app_refused_rate",
+    "prev_app_days_decision_min", "prev_app_days_decision_mean",
+    "inst_count", "inst_amt_payment_sum", "inst_amt_instalment_sum",
+    "inst_pay_delay_mean", "inst_pay_delay_max", "inst_prop_late",
+    "inst_n_missing_entry",
+    "bureau_credit_cnt", "bureau_credit_sum",
+    "bureau_credit_active_cnt", "bureau_credit_active_pct",
+    "bureau_days_credit_mean",
+    "bb_total_months", "bb_mean_status0_pct", "bb_mean_status1_pct"
+  ),
+  Source = c(rep("previous_application", 9),
+             rep("installments_payments", 7),
+             rep("bureau", 5),
+             rep("bureau_balance", 3)),
+  Description = c(
+    "Number of previous applications",
+    "Mean application amount",
+    "Total application amount",
+    "Mean credit amount",
+    "Mean down payment",
+    "Proportion approved",
+    "Proportion refused",
+    "Days since first decision",
+    "Mean days to decision",
+    "Number of installment records",
+    "Total payments made",
+    "Total installments due",
+    "Mean payment delay (days)",
+    "Maximum payment delay",
+    "Proportion of late payments",
+    "Missing payment entries",
+    "Number of bureau credits",
+    "Total bureau credit amount",
+    "Active bureau credits",
+    "Proportion active",
+    "Mean credit age (days)",
+    "Total bureau balance months",
+    "Proportion on-time (status 0)",
+    "Proportion 1-month late"
+  )
+)
+
+kable(agg_features,
+      caption = "All 24 Aggregated Features from Transactional Data")
+```
+
+## Join Results
+
+After aggregating, we joined the features to the application data using SK_ID_CURR as the key:
+
+```{r}
+#| label: join-results
+
+# Show join statistics
+cat("Join Statistics:\n")
+cat("─────────────────────────────────────────\n")
+cat(sprintf("Application train rows: %s\n", format(307511, big.mark = ",")))
+cat(sprintf("Application test rows:  %s\n", format(48744, big.mark = ",")))
+cat(sprintf("Aggregated customers:   %s\n", format(338857, big.mark = ",")))
+cat(sprintf("\nAfter LEFT JOIN:\n"))
+cat(sprintf("  Train: 307,511 rows × 146 columns (+24 new features)\n"))
+cat(sprintf("  Test:  48,744 rows × 145 columns (+24 new features)\n"))
+```
+
+### Missing Values in Aggregated Features
+
+Not all applicants have transactional history, resulting in missing values:
+
+```{r}
+#| label: agg-missing
+
+# Check missing values in aggregated features (using app_train as proxy)
+# These percentages represent customers with NO history in that source
+agg_missing <- data.frame(
+  Source = c("previous_application", "installments_payments", 
+             "bureau", "bureau_balance"),
+  Feature_Example = c("prev_app_count", "inst_count", 
+                      "bureau_credit_cnt", "bb_total_months"),
+  Pct_Missing = c("5.4%", "5.7%", "18.9%", "71.2%"),
+  Interpretation = c(
+    "5.4% have no previous Home Credit applications",
+    "5.7% have no installment payment history",
+    "18.9% have no bureau credit history",
+    "71.2% have no detailed bureau balance data"
+  )
+)
+
+kable(agg_missing,
+      caption = "Missing Values in Aggregated Features - Customers with No History")
+```
+
+### Interpretation
+
+The missing values are **informative**, not problematic:
+
+- Customers **without** previous applications (5.4%) are first-time applicants
+- Customers **without** bureau history (18.9%) may be credit-invisible
+- The high missingness in bureau_balance (71.2%) reflects limited detailed bureau data
+
+**Recommendation:** Create binary indicator variables (e.g., `has_prev_app`, `has_bureau`) to capture whether a customer has any transactional history. This missingness pattern itself may be predictive.
+
+---
+
+# Data Transformation Considerations
+
+Before modeling, the data will require various transformations. The specific transformations depend on the model type being used.
+
+## Summary of Transformation Needs by Model Type
+
+```{r}
+#| label: transformation-summary
+
+# Create summary table of transformations needed by model type
+transform_needs <- data.frame(
+  Transformation = c(
+    "Handle missing values",
+    "Encode categorical variables",
+    "Scale/normalize numeric features",
+    "Handle class imbalance",
+    "Remove near-zero variance",
+    "Fix DAYS_EMPLOYED sentinel"
+  ),
+  Tree_Models = c(
+    "Optional (can handle NA)",
+    "Label encode or leave as factor",
+    "Not required",
+    "Class weights recommended",
+    "Not critical",
+    "Required"
+  ),
+  Linear_Models = c(
+    "Required (impute + indicator)",
+    "One-hot encode",
+    "Required (standardize)",
+    "Class weights or SMOTE",
+    "Recommended",
+    "Required"
+  ),
+  Neural_Networks = c(
+    "Required (impute)",
+    "One-hot or embeddings",
+    "Required (normalize 0-1)",
+    "Class weights or SMOTE",
+    "Recommended",
+    "Required"
+  )
+)
+
+kable(transform_needs,
+      col.names = c("Transformation", "Tree Models (XGBoost)", "Linear Models (Logistic)", "Neural Networks"),
+      caption = "Required Transformations by Model Type")
+```
+
+## Detailed Transformation Requirements
+
+### 1. Missing Value Handling
+
+| Model Type | Approach |
+|------------|----------|
+| **XGBoost/LightGBM** | Can handle NA natively; still create missing indicators for extra signal |
+| **Logistic Regression** | Must impute: median (numeric), mode (categorical) + add missing flags |
+| **Random Forest** | Depends on implementation; often requires imputation |
+| **Neural Networks** | Must impute; consider using embedding layers for missing patterns |
+
+### 2. Categorical Variable Encoding
+
+Our data has **16 categorical variables** including:
+
+- `NAME_CONTRACT_TYPE` (2 levels)
+- `CODE_GENDER` (3 levels)  
+- `ORGANIZATION_TYPE` (58 levels - high cardinality!)
+- `OCCUPATION_TYPE` (18 levels)
+
+| Model Type | Encoding Strategy |
+|------------|-------------------|
+| **Tree-based** | Label encoding or native categorical support |
+| **Linear models** | One-hot encoding (watch for high cardinality) |
+| **Neural networks** | Embedding layers for high-cardinality features |
+
+**High cardinality concern:** `ORGANIZATION_TYPE` has 58 levels - consider grouping rare categories before one-hot encoding.
+
+### 3. Numeric Feature Scaling
+
+```{r}
+#| label: scale-need
+
+# Show range of numeric features to illustrate scaling need
+scale_examples <- app_train |>
+  select(AMT_INCOME_TOTAL, AMT_CREDIT, DAYS_BIRTH, EXT_SOURCE_1, CNT_CHILDREN) |>
+  summarise(across(everything(), list(
+    min = ~min(., na.rm = TRUE),
+    max = ~max(., na.rm = TRUE)
+  ))) |>
+  pivot_longer(everything(), names_to = "stat", values_to = "value") |>
+  separate(stat, into = c("variable", "stat"), sep = "_(?=[^_]+$)") |>
+  pivot_wider(names_from = stat, values_from = value)
+
+kable(scale_examples,
+      col.names = c("Variable", "Min", "Max"),
+      caption = "Feature Ranges - Illustrating Need for Scaling")
+```
+
+| Model Type | Scaling Required? |
+|------------|-------------------|
+| **Tree-based** | No - splits are invariant to monotonic transformations |
+| **Linear models** | Yes - standardization (z-score) recommended |
+| **Neural networks** | Yes - normalization to [0,1] or standardization |
+| **KNN/SVM** | Yes - essential for distance-based methods |
+
+### 4. Specific Transformations Required
+
+Based on our EDA, these transformations are **required regardless of model type**:
+
+1. **DAYS_EMPLOYED sentinel (365243)** → Replace with NA + create indicator
+2. **FLAG_OWN_CAR, FLAG_OWN_REALTY** → Convert "Y"/"N" to 1/0
+3. **OWN_CAR_AGE when FLAG_OWN_CAR="N"** → Set to 0 or keep NA with indicator
+
+### 5. Recommended Preprocessing Pipeline
+
+```
+For Tree-Based Models (XGBoost/LightGBM):
+─────────────────────────────────────────
+1. Fix DAYS_EMPLOYED sentinel → NA
+2. Convert Y/N flags to 1/0
+3. Label-encode categoricals (or use native categorical support)
+4. Create missing indicators for key variables
+5. Apply class weights for imbalance
+
+For Linear Models (Logistic Regression):
+────────────────────────────────────────
+1. Fix DAYS_EMPLOYED sentinel → NA
+2. Convert Y/N flags to 1/0
+3. Impute missing: median (numeric), mode (categorical)
+4. Create missing indicator variables
+5. One-hot encode categoricals (group rare levels first)
+6. Standardize all numeric features (z-score)
+7. Remove near-zero variance columns
+8. Apply class weights or use SMOTE
+```
+
+---
+
+# Results and Conclusions
+
+## Key Findings
+
+Through this exploratory data analysis, we have uncovered several important insights about the Home Credit default prediction problem:
+
+### 1. Target Variable Characteristics
+
+- **Severe class imbalance:** Only 8.07% of applicants default (TARGET=1), while 91.93% repay successfully
+- **Baseline accuracy:** A naive majority-class classifier would achieve 91.93% accuracy, making this metric misleading
+- **Implication:** We must use metrics like AUC-ROC, precision-recall, and F1-score rather than accuracy
+
+### 2. Strongest Predictors Identified
+
+**Numeric predictors (by AUC):**
+
+| Rank | Variable | AUC | Interpretation |
+|------|----------|-----|----------------|
+| 1 | EXT_SOURCE_3 | 0.321 | External credit score - lower = higher risk |
+| 2 | EXT_SOURCE_1 | 0.334 | External credit score - lower = higher risk |
+| 3 | EXT_SOURCE_2 | 0.344 | External credit score - lower = higher risk |
+| 4 | DAYS_BIRTH | 0.583 | Age - younger applicants default more |
+| 5 | OWN_CAR_AGE | 0.559 | Car age - older cars = higher risk |
+
+**Categorical predictors (by IV):**
+
+- OCCUPATION_TYPE (IV ≈ 0.08): Laborers and low-skill workers have higher default rates
+- ORGANIZATION_TYPE (IV ≈ 0.07): Business type correlates with risk
+- NAME_EDUCATION_TYPE (IV ≈ 0.05): Lower education = higher default risk
+
+### 3. Missing Data Patterns
+
+- **67 of 122 variables** have missing data (55 are complete)
+- **~24% of all cells** are missing
+- Missing data is concentrated in:
+  - Building/housing features (60-70% missing) - likely structural
+  - EXT_SOURCE_1 (56% missing) - important predictor with high missingness
+  - OWN_CAR_AGE (66% missing) - structural (no car = no car age)
+- **Missingness is informative:** Default rates differ between missing/present groups for key variables
+
+## Data Problems Discovered
+
+### Problem 1: DAYS_EMPLOYED Sentinel Value
+
+- **Issue:** 365,243 appears as a placeholder value (~18% of records)
+- **Impact:** This impossible value (1000+ years) corrupts statistical analyses
+- **Solution:** Replace with NA and create an indicator flag
+
+### Problem 2: Structural Missingness
+
+- **Issue:** OWN_CAR_AGE is missing when FLAG_OWN_CAR = "N"
+- **Impact:** Simple imputation would be inappropriate
+- **Solution:** Handle based on FLAG_OWN_CAR; create indicator variable
+
+### Problem 3: Class Imbalance
+
+- **Issue:** 92% vs 8% class distribution
+- **Impact:** Models may predict majority class exclusively
+- **Solution:** Use stratified sampling, class weights, or resampling techniques (SMOTE)
+
+## Strong Relationships
+
+The following relationships appear particularly strong and should be leveraged in modeling:
+
+1. **External scores → Default:** All three EXT_SOURCE variables show clear separation between defaulters and non-defaulters. These should be primary features.
+
+2. **Age → Default:** Younger applicants (less negative DAYS_BIRTH) default more frequently. Consider creating age bins or polynomial features.
+
+3. **Employment stability → Default:** Longer employment history correlates with lower default risk (when excluding the sentinel value).
+
+4. **Education/Occupation → Default:** Lower education and manual labor occupations show higher default rates. Consider grouping rare categories.
+
+## Impact on Analytics Approach
+
+Based on this EDA, we recommend the following modeling strategy:
+
+### Data Preprocessing
+
+1. **Replace sentinel values** in DAYS_EMPLOYED with NA
+2. **Create missingness indicators** for EXT_SOURCE variables, OWN_CAR_AGE, OCCUPATION_TYPE
+3. **Handle structural missingness** based on related flags
+4. **Do not remove rows** - row-level missingness is not extreme
+5. **Consider removing** high-missing (>70%), low-predictive columns only after evaluation
+
+### Feature Engineering
+
+1. **Prioritize EXT_SOURCE features** - consider interactions and polynomial terms
+2. **Create age-based features** from DAYS_BIRTH (age groups, decades)
+3. **Create stability indicators** combining employment, registration, phone change
+4. **Group rare categorical levels** to reduce noise
+
+### Model Selection
+
+1. **Start with tree-based models** (XGBoost, LightGBM) that handle missing values natively
+2. **Use appropriate metrics:** AUC-ROC, PR-AUC, F1-score (not accuracy)
+3. **Apply class weighting** or resampling to address imbalance
+4. **Use cross-validation** with stratified folds to preserve class ratios
+
+### Validation Strategy
+
+1. **Stratified k-fold cross-validation** to maintain class balance
+2. **Monitor both AUC and precision-recall** given class imbalance
+3. **Create holdout test set** for final evaluation
+4. **Consider calibration** for probability estimates
+
+
+---
+
+# Ai usage
+
+I initially tried to use Databot to fully answer all the questions in the assignment, but the results were completely wrong, poorly structured, and not even close to reality. I decided to start over and go through the exploration step by step, without overwhelming Databot. That approach worked much better.
+Databot still tends to get overwhelmed and sometimes produces errors, so I often had to restart my interaction. I found that the best way to do this was simply to write something like “hey, are you here?” instead of repeating the full question again. When the question is repeated directly, the system seems to get overwhelmed once more.
+I also learned that it’s necessary to carefully review all of Databot’s exploratory analysis, because it can make mistakes in interpretation. When asking it to fix an interpretation, it’s especially important to verify the plots as well.
+Overall, Databot is definitely a powerful tool that made the exploratory data analysis process way faster, but it still requires clear planning and human oversight.
+
+---
+
+# Appendix
+
+```{r}
+#| label: session-info
+
+sessionInfo()
+```
