@@ -1,8 +1,8 @@
-# Home Credit Data Preparation Pipeline
+# MSBA1 - Home Credit Data Preparation Pipeline
 
 ## Overview
 
-Complete, modular data preparation pipeline for Home Credit default risk prediction. All functions are reusable, well-documented, and prevent data leakage.
+This is my **Home Credit Default Risk** project for MSBA1. Complete, modular data preparation pipeline for Home Credit default risk prediction. All functions are reusable, well-documented, and prevent data leakage.
 
 ## 🎯 Key Features
 
