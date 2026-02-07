@@ -3,7 +3,7 @@
 # Modular, reusable functions for consistent data preprocessing
 # Prevents data leakage and ensures train/test consistency
 #
-# Author: Databot
+# Author: Bogdan Shalimov with Databot
 # Date: 2026-02-05
 # Purpose: Complete, reproducible preprocessing pipeline
 
