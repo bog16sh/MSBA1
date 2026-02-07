@@ -1,8 +1,16 @@
-# Large CSV data files
+# Large CSV data files (exclude all except documentation)
 *.csv
+# But allow small documentation files
+!HomeCredit_columns_description.csv
 
-# RDS files (processed data)
+# All RDS files (processed data and models)
 *.rds
+
+# Model objects and large intermediate files
+*.pkl
+*.joblib
+*.h5
+*.model
 
 # R session files
 .Rhistory
@@ -12,25 +20,45 @@
 # System files
 .DS_Store
 Thumbs.db
+.directory
 
 # Temporary files
 *~
 *.tmp
 *.bak*
+*.swp
+*.swo
 
-# Large documentation files  
+# Large documentation files that should be downloaded separately
 *.pdf
 *.docx
+*.zip
+*.tar.gz
 
-# HTML output files
+# HTML output files (can be regenerated)
 *.html
 
-# Figure output directory
+# Figure output directories (can be regenerated)
 figure/
 *_files/
+plots/
 
 # Backup files
 *.qmd.bak*
+*.R.bak*
 
 # Log files
 *.log
+
+# IDE files
+.vscode/
+.idea/
+
+# OS generated files
+Icon?
+ehthumbs.db
+
+# Large data directories
+data/
+raw_data/
+processed_data/

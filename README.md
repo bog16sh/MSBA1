@@ -1,154 +1,161 @@
-# MSBA1 - Home Credit Data Preparation Pipeline
+# MSBA1 - Home Credit Data Preparation Script
 
-## Overview
+## What This Script Does
 
-This is my **Home Credit Default Risk** project for MSBA1. Complete, modular data preparation pipeline for Home Credit default risk prediction. All functions are reusable, well-documented, and prevent data leakage.
+The `data_preparation.R` script is a **comprehensive, modular data preprocessing pipeline** for the Home Credit Default Risk dataset. It transforms raw application and transactional data into clean, model-ready datasets while preventing data leakage and ensuring train/test consistency.
 
-## 🎯 Key Features
+### Key Problems It Solves:
+- **Data Quality Issues**: Fixes sentinel values, inconsistent encodings, and near-zero variance variables
+- **Missing Data**: Creates meaningful missing indicators and handles imputation consistently  
+- **Feature Engineering**: Converts raw features into predictive variables (age, financial ratios, etc.)
+- **Data Leakage Prevention**: Ensures all preprocessing parameters come from training data only
+- **Model Compatibility**: Creates optimized datasets for both tree-based and linear models
 
-- ✅ **Modular Functions**: 30+ reusable functions that work on both train and test data
-- ✅ **Well Documented**: Every function has `@param`, `@return`, and `@examples` 
-- ✅ **Zero Data Leakage**: All parameters computed from training data only
-- ✅ **Production Ready**: Saved parameters for consistent deployment
-- ✅ **Validated**: Automatic consistency checks prevent errors
+## How to Use the Script
 
-## 🚀 Quick Start
-
+### Basic Usage
 ```r
-# Load the pipeline
+# 1. Load the script
 source("data_preparation.R")
 
-# Run complete preprocessing
-result <- run_data_preparation_pipeline(train_data, test_data, save_outputs = TRUE)
+# 2. Run the complete pipeline
+result <- run_data_preparation_pipeline(train_data, test_data)
 
-# Get model-ready datasets
-train_for_xgboost <- result$train_tree      # Keeps NAs + indicators
+# 3. Get cleaned datasets
+train_for_xgboost <- result$train_tree      # For tree models (XGBoost, LightGBM)
 test_for_xgboost <- result$test_tree
-train_for_logistic <- result$train_linear   # Fully imputed  
+train_for_logistic <- result$train_linear   # For linear models (fully imputed)
 test_for_logistic <- result$test_linear
-
-# Verify success
-if (result$pipeline_success) {
-  cat("✅ Pipeline completed successfully!")
-}
 ```
 
-## 📋 What the Pipeline Does
+### What You Get
+The script outputs **4 clean datasets** and **preprocessing parameters**:
 
-### 1. Data Quality Fixes
-- **DAYS_EMPLOYED**: Replace 365243 sentinel → NA + indicator
-- **FLAG columns**: Normalize Y/N to consistent 0/1 encoding
-- **Near-zero variance**: Identify variables with >99.5% same value
+| Output | Purpose | Description |
+|--------|---------|-------------|
+| `train_tree` | Tree models | Keeps NAs (trees handle them) + missing indicators |
+| `test_tree` | Tree models | Same preprocessing as train_tree |
+| `train_linear` | Linear models | Fully imputed data + missing indicators |  
+| `test_linear` | Linear models | Same preprocessing as train_linear |
+| `preprocessing_parameters.rds` | Production | All parameters for new data preprocessing |
 
-### 2. Feature Engineering  
-- **DAYS → YEARS**: Convert negative days to positive years (`AGE_YEARS`)
-- **Financial ratios**: DTI, PTI, LTV, income per person, credit terms
-- **EXT_SOURCE**: Aggregate 3 external scores (mean, count, max, min)
+## Script Architecture
 
-### 3. Missing Data Intelligence
-- **Individual indicators**: `variable_missing` flags for 1-90% missing
-- **Group patterns**: `EXT_SOURCE_all_missing`, `BUILDING_high_missing`
-- **Overall metrics**: Total missing count and percentage per customer
+### 30+ Modular Functions Organized in Categories:
 
-### 4. Train-Only Parameter Computation 🔒
-- **Medians/modes**: Computed from training data only
-- **Binning breaks**: Quantiles from training distribution only  
-- **Capping thresholds**: 99th percentiles from training only
-- **Zero data leakage**: Test data never influences any parameter
+#### 1. **Data Quality Functions**
+```r
+fix_days_employed_sentinel(data)     # Fixes 365243 sentinel → NA + indicator
+normalize_flag_columns(data)         # Converts Y/N flags to consistent 0/1
+identify_near_zero_variance(data)    # Finds variables with >99.5% same value
+```
 
-### 5. Model-Specific Outputs
-- **Tree models**: Keeps NAs (XGBoost handles them) + missing indicators
-- **Linear models**: Full imputation + missing indicators
+#### 2. **Feature Engineering Functions** 
+```r
+convert_days_to_years(data)          # DAYS_BIRTH → AGE_YEARS (positive)
+create_financial_ratios(data)        # DTI, LTV, payment ratios, risk flags
+create_ext_source_aggregates(data)   # Combines 3 external credit scores
+```
 
-## 🔒 Data Leakage Prevention
+#### 3. **Missing Data Functions**
+```r
+create_missing_indicators(data)      # Creates variable_missing flags
+create_group_missing_indicators(data) # EXT_SOURCE_all_missing, etc.
+```
+
+#### 4. **Imputation Functions (Zero Data Leakage)**
+```r
+params <- compute_imputation_parameters(train_data)  # TRAINING DATA ONLY!
+train_clean <- apply_imputation(train_data, params)  # Apply to train
+test_clean <- apply_imputation(test_data, params)    # Same parameters to test
+```
+
+## Key Features
+
+### ✅ **Zero Data Leakage**
+All preprocessing parameters (medians, quantiles, modes) are computed from **training data only** and applied consistently to test data:
 
 ```r
-# ✅ CORRECT: Parameters from training only
+# ✅ CORRECT - No data leakage
 params <- compute_imputation_parameters(train_data)  # Train only!
-train_clean <- apply_imputation(train_data, params)   # Uses train median
-test_clean <- apply_imputation(test_data, params)     # Same train median!
+test_imputed <- apply_imputation(test_data, params)  # Uses train medians
 
-# ❌ WRONG: Combined data (data leakage!)
+# ❌ WRONG - Data leakage!  
 # params <- compute_imputation_parameters(rbind(train, test))
 ```
 
-## 📁 Output Files
-
-- `train_cleaned_tree.rds` / `test_cleaned_tree.rds` - For XGBoost/LightGBM
-- `train_cleaned_linear.rds` / `test_cleaned_linear.rds` - For logistic regression  
-- `preprocessing_parameters.rds` - All parameters for production
-- `nzv_variables_review.csv` - Variables to consider dropping
-- `preprocessing_summary.csv` - Dataset statistics
-
-## 🔧 Individual Function Examples
-
-All functions work identically on train and test data:
-
+### ✅ **Modular & Reusable**
+Every function works on both train and test data:
 ```r
-# Same cleaning functions for both datasets
-train_clean <- fix_days_employed_sentinel(train_data)
-test_clean <- fix_days_employed_sentinel(test_data)  # Same function!
-
-train_flags <- normalize_flag_columns(train_clean)
-test_flags <- normalize_flag_columns(test_clean)    # Same function!
-
-# Feature engineering - same functions
-train_features <- convert_days_to_years(train_flags)
-test_features <- convert_days_to_years(test_flags)  # Same function!
-
-# Imputation with train-only parameters
-params <- compute_imputation_parameters(train_features)  # TRAIN ONLY!
-train_imputed <- apply_imputation(train_features, params)
-test_imputed <- apply_imputation(test_features, params)  # Same parameters!
+# Same function, different datasets
+train_fixed <- fix_days_employed_sentinel(train_data)
+test_fixed <- fix_days_employed_sentinel(test_data)  # Identical processing
 ```
 
-## 🚀 Production Deployment
-
-```r
-# Apply same preprocessing to new data
-new_processed <- preprocess_new_data(
-  new_data = new_applications,
-  params_file = "preprocessing_parameters.rds", 
-  model_type = "tree"  # or "linear"
-)
-
-# Make predictions
-model <- readRDS("trained_model.rds")
-predictions <- predict(model, new_processed)
-```
-
-## ✅ Validation Checks
-
-The pipeline automatically validates:
-- ✅ No data leakage (all parameters from training only)
-- ✅ Column consistency (identical features except TARGET)  
-- ✅ Imputation integrity (same medians/modes for train/test)
-- ✅ Feature alignment (names, types, order match exactly)
-
-## 📖 Function Documentation
-
+### ✅ **Well Documented**
 Every function includes complete documentation:
-
 ```r
 #' Fix DAYS_EMPLOYED sentinel value
-#' 
-#' Replaces the sentinel value (365243 = ~1000 years) with NA and creates
-#' an indicator variable to preserve the information that the value was missing
-#' 
-#' @param data Data frame with DAYS_EMPLOYED column
-#' @param sentinel_value Numeric sentinel value to replace (default: 365243)
-#' @return Data frame with fixed DAYS_EMPLOYED and new indicator column
-#' @examples
-#' data_clean <- fix_days_employed_sentinel(data)
+#' @param data Data frame with DAYS_EMPLOYED column  
+#' @return Data frame with fixed column + indicator
+#' @examples data_clean <- fix_days_employed_sentinel(data)
 ```
 
-## 🎉 Ready to Use!
+### ✅ **Production Ready**
+```r
+# Apply to new data using saved parameters
+new_processed <- preprocess_new_data(new_data, "preprocessing_parameters.rds")
+```
 
-The pipeline is production-ready with:
-- **30+ modular functions** - each reusable and testable
-- **Complete documentation** - every function has examples
-- **Zero data leakage** - training-only parameter computation  
-- **Train/test consistency** - identical preprocessing guaranteed
-- **Production deployment** - saved parameters for new data
+## What Gets Created
 
-**Start with**: `source("data_preparation.R")` and you're ready to go!
+### Engineered Features:
+- **Demographics**: `AGE_YEARS`, `AGE_GROUP`, `YEARS_EMPLOYED`
+- **Financial Ratios**: `DEBT_TO_INCOME_RATIO`, `PAYMENT_TO_INCOME_RATIO`, `LOAN_TO_VALUE_RATIO`
+- **External Scores**: `EXT_SOURCE_MEAN`, `EXT_SOURCE_COUNT`, `EXT_SOURCE_MAX`
+- **Missing Indicators**: `EXT_SOURCE_1_missing`, `BUILDING_high_missing`, etc.
+- **Risk Flags**: `HIGH_DTI_FLAG`, `LOW_INCOME_FLAG`
+
+### Data Quality Fixes:
+- DAYS_EMPLOYED 365243 sentinel → NA + indicator (fixes ~18% of data)
+- FLAG columns normalized to consistent 0/1 encoding  
+- Near-zero variance variables identified for removal
+
+## File Structure
+
+```
+📁 data_preparation.R          # Complete preprocessing pipeline (this script)
+📁 README.md                   # This documentation
+📁 HomeCredit_EDA.qmd          # Exploratory data analysis  
+📁 .gitignore                  # Excludes data files from git
+📁 HomeCredit_columns_description.csv  # Data dictionary
+```
+
+## Important Notes
+
+### 🚫 **Data Files Not Included**
+This repository contains **code only**. You need to provide:
+- `application_train.csv` - Training data
+- `application_test.csv` - Test data  
+- Transactional files (bureau.csv, etc.) - Optional for enhanced features
+
+### ⚡ **Quick Start**
+1. Place your CSV files in the same directory
+2. Load data: `train <- read_csv("application_train.csv")`
+3. Run script: `source("data_preparation.R")`  
+4. Process: `result <- run_data_preparation_pipeline(train, test)`
+5. Model: Use `result$train_tree` and `result$test_tree` for XGBoost
+
+## Why This Approach?
+
+This script follows **industry best practices** for ML preprocessing:
+
+- **Reproducible**: Same parameters always produce same results
+- **Scalable**: Functions work on datasets of any size
+- **Safe**: Prevents data leakage that inflates model performance
+- **Flexible**: Works with different model types (tree vs linear)
+- **Maintainable**: Modular functions are easy to test and debug
+
+---
+
+**Ready to preprocess your Home Credit data?** Just `source("data_preparation.R")` and run the pipeline! 🚀
