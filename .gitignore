@@ -11,6 +11,14 @@
 *.joblib
 *.h5
 *.model
+*.xgb
+*.lgb
+*.txt
+
+# Submission files (contest submissions)
+submission.csv
+homeCredit_submission.csv
+*_submission.csv
 
 # R session files
 .Rhistory

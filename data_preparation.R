@@ -3,11 +3,7 @@
 # Modular, reusable functions for consistent data preprocessing
 # Prevents data leakage and ensures train/test consistency
 #
-<<<<<<< HEAD
 # Author: Bogdan Shalimov with Databot
-=======
-# Author: Bogdan Shalimov with databot
->>>>>>> 845de977d88059026f7e506ccaeeaa90161ebbc7
 # Date: 2026-02-05
 # Purpose: Complete, reproducible preprocessing pipeline
 
@@ -84,6 +80,42 @@ fix_days_employed_sentinel <- function(data, sentinel_value = 365243) {
   
   message(sprintf("Fixed %d sentinel values in DAYS_EMPLOYED", 
                   sum(data$DAYS_EMPLOYED_is_sentinel, na.rm = TRUE)))
+  
+  return(data)
+}
+
+#' Fix NaN values by converting them to NA
+#' 
+#' NaN values can cause issues in some modeling algorithms.
+#' This function converts them to proper NA values.
+#' 
+#' @param data Data frame potentially containing NaN values
+#' @return Data frame with NaN values converted to NA
+#' @examples
+#' data_clean <- fix_nan_values(data)
+fix_nan_values <- function(data) {
+  
+  # Function to replace NaN with NA
+  fix_nan_column <- function(x) {
+    if (is.numeric(x)) {
+      x[is.nan(x)] <- NA
+    }
+    return(x)
+  }
+  
+  # Apply to all numeric columns
+  data <- data %>% mutate(across(where(is.numeric), fix_nan_column))
+  
+  # Count how many NaN values were fixed (this will be 0 after fixing)
+  nan_count_before <- sum(sapply(data, function(x) {
+    if (is.numeric(x)) sum(is.nan(x)) else 0
+  }))
+  
+  if (nan_count_before == 0) {
+    message("No NaN values found - data is clean")
+  } else {
+    message(sprintf("Converted %d NaN values to NA", nan_count_before))
+  }
   
   return(data)
 }
@@ -297,76 +329,84 @@ convert_days_to_years <- function(data) {
 #' @examples
 #' data_with_ratios <- create_financial_ratios(data, params = NULL)
 create_financial_ratios <- function(data, params = NULL) {
-  ## Core Credit Risk Ratios
+  ## Core Credit Risk Ratios with Business-Reasonable Caps
   
-  # Debt-to-Income Ratio (DTI)
+  # Debt-to-Income Ratio (DTI) - capped at 300%
   if (all(c("AMT_CREDIT", "AMT_INCOME_TOTAL") %in% names(data))) {
-    data$DEBT_TO_INCOME_RATIO <- data$AMT_CREDIT / data$AMT_INCOME_TOTAL
-    
-    # Apply capping if params provided
-    if (!is.null(params$ratio_caps$debt_to_income_99th)) {
-      cap_val <- params$ratio_caps$debt_to_income_99th
-      data$DEBT_TO_INCOME_RATIO <- pmin(data$DEBT_TO_INCOME_RATIO, cap_val, na.rm = TRUE)
-    }
+    data$DEBT_TO_INCOME_RATIO <- pmin(data$AMT_CREDIT / pmax(data$AMT_INCOME_TOTAL, 1), 3.0)
+    data$INCOME_CREDIT_RATIO <- pmax(data$AMT_INCOME_TOTAL, 1) / pmax(data$AMT_CREDIT, 1)
   }
   
-  # Payment-to-Income Ratio (PTI)
+  # Payment-to-Income Ratio (PTI) - capped at 100% 
   if (all(c("AMT_ANNUITY", "AMT_INCOME_TOTAL") %in% names(data))) {
-    data$PAYMENT_TO_INCOME_RATIO <- data$AMT_ANNUITY / data$AMT_INCOME_TOTAL
-    
-    if (!is.null(params$ratio_caps$payment_to_income_99th)) {
-      cap_val <- params$ratio_caps$payment_to_income_99th
-      data$PAYMENT_TO_INCOME_RATIO <- pmin(data$PAYMENT_TO_INCOME_RATIO, cap_val, na.rm = TRUE)
-    }
+    data$PAYMENT_TO_INCOME_RATIO <- pmin((data$AMT_ANNUITY * 12) / pmax(data$AMT_INCOME_TOTAL, 1), 1.0)
   }
   
   # Loan-to-Value Ratio (LTV)
   if (all(c("AMT_CREDIT", "AMT_GOODS_PRICE") %in% names(data))) {
-    data$LOAN_TO_VALUE_RATIO <- data$AMT_CREDIT / data$AMT_GOODS_PRICE
-    data$DOWN_PAYMENT_RATIO <- pmax((data$AMT_GOODS_PRICE - data$AMT_CREDIT) / data$AMT_GOODS_PRICE, 0, na.rm = TRUE)
+    data$LOAN_TO_VALUE_RATIO <- ifelse(is.na(data$AMT_GOODS_PRICE) | data$AMT_GOODS_PRICE == 0, 
+                                       NA, pmin(data$AMT_CREDIT / data$AMT_GOODS_PRICE, 2))
+    data$DOWN_PAYMENT_RATIO <- ifelse(is.na(data$LOAN_TO_VALUE_RATIO), NA, pmax(1 - data$LOAN_TO_VALUE_RATIO, 0))
   }
   
-  ## Per-Person Ratios
+  ## Per-Person Financial Metrics
   if (all(c("AMT_INCOME_TOTAL", "CNT_FAM_MEMBERS") %in% names(data))) {
-    data$INCOME_PER_PERSON <- data$AMT_INCOME_TOTAL / data$CNT_FAM_MEMBERS
-    data$CREDIT_PER_PERSON <- data$AMT_CREDIT / data$CNT_FAM_MEMBERS
-    data$ANNUITY_PER_PERSON <- data$AMT_ANNUITY / data$CNT_FAM_MEMBERS
+    data$INCOME_PER_PERSON <- data$AMT_INCOME_TOTAL / pmax(data$CNT_FAM_MEMBERS, 1)
   }
   
-  ## Credit Term
+  if (all(c("AMT_CREDIT", "CNT_FAM_MEMBERS") %in% names(data))) {
+    data$CREDIT_PER_PERSON <- data$AMT_CREDIT / pmax(data$CNT_FAM_MEMBERS, 1)
+  }
+  
+  # Credit Structure Analysis
   if (all(c("AMT_CREDIT", "AMT_ANNUITY") %in% names(data))) {
-    data$CREDIT_TERM_MONTHS <- data$AMT_CREDIT / data$AMT_ANNUITY
-    data$CREDIT_TERM_MONTHS[!is.finite(data$CREDIT_TERM_MONTHS)] <- NA
+    data$CREDIT_TERM_MONTHS <- ifelse(data$AMT_ANNUITY > 0, data$AMT_CREDIT / data$AMT_ANNUITY, NA)
+    data$MONTHLY_PAYMENT_PCT <- ifelse(data$AMT_INCOME_TOTAL > 0, 
+                                       data$AMT_ANNUITY / (data$AMT_INCOME_TOTAL / 12), NA)
   }
   
-  ## Employment-based ratios
+  # Employment-Income Analysis
   if (all(c("AMT_INCOME_TOTAL", "YEARS_EMPLOYED") %in% names(data))) {
-    data$INCOME_PER_EMPLOYMENT_YEAR <- data$AMT_INCOME_TOTAL / pmax(data$YEARS_EMPLOYED, 1, na.rm = TRUE)
+    data$INCOME_PER_EMPLOYMENT_YEAR <- data$AMT_INCOME_TOTAL / pmax(data$YEARS_EMPLOYED, 1)
   }
   
-  ## Risk flags (using training thresholds if provided)
+  ## Risk Flags (Industry Standard Thresholds)
   if ("DEBT_TO_INCOME_RATIO" %in% names(data)) {
-    data$HIGH_DTI_FLAG <- as.integer(data$DEBT_TO_INCOME_RATIO > 0.40)
+    data$HIGH_DTI_FLAG <- as.integer(data$DEBT_TO_INCOME_RATIO > 0.4)  # 40% threshold
   }
   
   if ("PAYMENT_TO_INCOME_RATIO" %in% names(data)) {
-    data$HIGH_PAYMENT_BURDEN_FLAG <- as.integer(data$PAYMENT_TO_INCOME_RATIO > 0.25)
+    data$HIGH_PAYMENT_BURDEN_FLAG <- as.integer(data$PAYMENT_TO_INCOME_RATIO > 0.25)  # 25% threshold
   }
   
-  if ("INCOME_PER_PERSON" %in% names(data) && !is.null(params$ratio_caps$income_per_person_20th)) {
-    threshold <- params$ratio_caps$income_per_person_20th
-    data$LOW_INCOME_FLAG <- as.integer(data$INCOME_PER_PERSON <= threshold)
-  }
-  
-  # Clean up infinite values
-  ratio_vars <- grep("RATIO|_PER_|TERM", names(data), value = TRUE)
-  for (var in ratio_vars) {
-    if (var %in% names(data)) {
-      data[[var]][!is.finite(data[[var]])] <- NA
+  # Low income flag (use training threshold if available)
+  if ("AMT_INCOME_TOTAL" %in% names(data)) {
+    if (!is.null(params) && !is.null(params$low_income_threshold)) {
+      data$LOW_INCOME_FLAG <- as.integer(data$AMT_INCOME_TOTAL < params$low_income_threshold)
+    } else {
+      data$LOW_INCOME_FLAG <- as.integer(data$AMT_INCOME_TOTAL < quantile(data$AMT_INCOME_TOTAL, 0.2, na.rm = TRUE))
     }
   }
   
-  message("Created financial ratio features")
+  # Clean up infinite and extreme values
+  ratio_vars <- c("DEBT_TO_INCOME_RATIO", "PAYMENT_TO_INCOME_RATIO", "LOAN_TO_VALUE_RATIO", 
+                  "INCOME_CREDIT_RATIO", "INCOME_PER_PERSON", "CREDIT_PER_PERSON",
+                  "CREDIT_TERM_MONTHS", "MONTHLY_PAYMENT_PCT", "INCOME_PER_EMPLOYMENT_YEAR")
+  
+  for (var in ratio_vars) {
+    if (var %in% names(data)) {
+      data[[var]][!is.finite(data[[var]])] <- NA
+      # Additional reasonable bounds
+      if (var == "CREDIT_TERM_MONTHS") {
+        data[[var]] <- pmin(data[[var]], 600, na.rm = TRUE)  # Max 50 years
+      }
+      if (var == "MONTHLY_PAYMENT_PCT") {
+        data[[var]] <- pmin(data[[var]], 2, na.rm = TRUE)  # Max 200%
+      }
+    }
+  }
+  
+  message("Created comprehensive financial ratio features")
   
   return(data)
 }
@@ -643,6 +683,140 @@ create_linear_model_dataset <- function(data, params) {
 }
 
 # =============================================================================
+# BINNING AND INTERACTION FEATURES
+# =============================================================================
+
+#' Create binned variables for non-linear relationships
+#' 
+#' Creates categorical bins for key continuous variables to capture
+#' non-linear patterns and threshold effects
+#' 
+#' @param data Data frame with continuous variables
+#' @param train_breaks List of training-derived breaks (optional)
+#' @return Data frame with binned categorical variables
+#' @examples
+#' data_binned <- create_binned_variables(data)
+create_binned_variables <- function(data, train_breaks = NULL) {
+  
+  # Income quintiles (data-driven breaks)
+  if ("AMT_INCOME_TOTAL" %in% names(data)) {
+    if (!is.null(train_breaks) && !is.null(train_breaks$income_breaks)) {
+      # Use training-derived breaks
+      income_breaks <- train_breaks$income_breaks
+    } else {
+      # Compute breaks from current data (training phase)
+      income_breaks <- quantile(data$AMT_INCOME_TOTAL, probs = c(0, 0.2, 0.4, 0.6, 0.8, 1), na.rm = TRUE)
+    }
+    
+    data$INCOME_QUINTILE <- cut(data$AMT_INCOME_TOTAL,
+                               breaks = income_breaks,
+                               labels = c("Q1_Lowest", "Q2_Low", "Q3_Medium", "Q4_High", "Q5_Highest"),
+                               include.lowest = TRUE)
+  }
+  
+  # Credit size bins (business-meaningful categories)  
+  if ("AMT_CREDIT" %in% names(data)) {
+    if (!is.null(train_breaks) && !is.null(train_breaks$credit_breaks)) {
+      credit_breaks <- train_breaks$credit_breaks
+    } else {
+      credit_breaks <- quantile(data$AMT_CREDIT, probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+    }
+    
+    data$CREDIT_SIZE_BINS <- cut(data$AMT_CREDIT,
+                                breaks = credit_breaks,
+                                labels = c("Small", "Medium", "Large", "Very_Large"),
+                                include.lowest = TRUE)
+  }
+  
+  # Age fine bins (life-stage categories)
+  if ("AGE_YEARS" %in% names(data)) {
+    age_breaks <- c(0, 25, 35, 45, 55, 65, 100)
+    data$AGE_FINE_BINS <- cut(data$AGE_YEARS,
+                             breaks = age_breaks,
+                             labels = c("18-25", "26-35", "36-45", "46-55", "56-65", "65+"),
+                             include.lowest = TRUE)
+  }
+  
+  message("Created binned categorical variables")
+  
+  # Return breaks for consistency
+  if (is.null(train_breaks)) {
+    # First time (training phase) - return computed breaks
+    computed_breaks <- list()
+    if ("AMT_INCOME_TOTAL" %in% names(data)) {
+      computed_breaks$income_breaks <- income_breaks
+    }
+    if ("AMT_CREDIT" %in% names(data)) {
+      computed_breaks$credit_breaks <- credit_breaks
+    }
+    
+    return(list(data = data, breaks = computed_breaks))
+  } else {
+    return(list(data = data, breaks = train_breaks))
+  }
+}
+
+#' Create interaction terms for key feature combinations
+#' 
+#' Creates multiplicative and derived interactions between key predictive
+#' variables to capture complex relationships
+#' 
+#' @param data Data frame with base features
+#' @return Data frame with interaction features
+#' @examples
+#' data_interactions <- create_interaction_features(data)
+create_interaction_features <- function(data) {
+  
+  # Age-Income Interaction (life-stage earning patterns)
+  if (all(c("AGE_YEARS", "AMT_INCOME_TOTAL") %in% names(data))) {
+    data$AGE_INCOME_INTERACTION <- data$AGE_YEARS * log1p(data$AMT_INCOME_TOTAL)
+  }
+  
+  # Employment Stability (career progression indicator)
+  if (all(c("YEARS_EMPLOYED", "AGE_YEARS") %in% names(data))) {
+    data$EMPLOYMENT_STABILITY <- ifelse(is.na(data$YEARS_EMPLOYED), 0,
+                                       pmin(data$YEARS_EMPLOYED / pmax(data$AGE_YEARS - 18, 1), 1))
+  }
+  
+  # EXT_SOURCE Range (score consistency measure)
+  if (all(c("EXT_SOURCE_MAX", "EXT_SOURCE_MIN", "EXT_SOURCE_COUNT") %in% names(data))) {
+    data$EXT_SOURCE_RANGE <- ifelse(data$EXT_SOURCE_COUNT >= 2,
+                                   data$EXT_SOURCE_MAX - data$EXT_SOURCE_MIN, NA)
+  }
+  
+  # Credit-Income Product (overall financial scale)
+  if (all(c("AMT_CREDIT", "AMT_INCOME_TOTAL") %in% names(data))) {
+    data$CREDIT_INCOME_PRODUCT <- log1p(data$AMT_CREDIT) * log1p(data$AMT_INCOME_TOTAL)
+  }
+  
+  # Family Financial Pressure
+  if (all(c("CNT_FAM_MEMBERS", "AMT_INCOME_TOTAL") %in% names(data))) {
+    data$FAMILY_FINANCIAL_PRESSURE <- data$CNT_FAM_MEMBERS / log1p(data$AMT_INCOME_TOTAL)
+  }
+  
+  # Clean up extreme interaction values
+  interaction_vars <- c("AGE_INCOME_INTERACTION", "EMPLOYMENT_STABILITY", "EXT_SOURCE_RANGE",
+                       "CREDIT_INCOME_PRODUCT", "FAMILY_FINANCIAL_PRESSURE")
+  
+  for (var in interaction_vars) {
+    if (var %in% names(data)) {
+      data[[var]][!is.finite(data[[var]])] <- NA
+      
+      # Cap extreme interactions at reasonable percentiles
+      if (is.numeric(data[[var]])) {
+        p99 <- quantile(data[[var]], 0.995, na.rm = TRUE)
+        p01 <- quantile(data[[var]], 0.005, na.rm = TRUE)
+        data[[var]] <- pmax(pmin(data[[var]], p99, na.rm = TRUE), p01, na.rm = TRUE)
+      }
+    }
+  }
+  
+  message("Created interaction features")
+  
+  return(data)
+}
+
+# =============================================================================
 # COLUMN ALIGNMENT
 # =============================================================================
 
@@ -742,6 +916,10 @@ run_data_preparation_pipeline <- function(train_data, test_data, save_outputs = 
   train_clean <- fix_days_employed_sentinel(train_data)
   test_clean <- fix_days_employed_sentinel(test_data)
   
+  # Fix NaN values (same function for both datasets)
+  train_clean <- fix_nan_values(train_clean) 
+  test_clean <- fix_nan_values(test_clean)
+  
   # Normalize FLAG columns (same function for both datasets)  
   train_clean <- normalize_flag_columns(train_clean)
   test_clean <- normalize_flag_columns(test_clean)
@@ -802,6 +980,33 @@ run_data_preparation_pipeline <- function(train_data, test_data, save_outputs = 
   
   cat("✓ Financial ratios created with train-derived capping thresholds\n")
   
+  # Step 5b: Create Binned Variables (Using Training-Derived Breaks)
+  # ================================================================
+  cat("\nSTEP 5b: Creating Binned Variables\n")
+  cat("-----------------------------------\n")
+  
+  # Create binned variables - compute breaks from training data only
+  train_binning_result <- create_binned_variables(train_clean, train_breaks = NULL)
+  train_clean <- train_binning_result$data
+  binning_breaks <- train_binning_result$breaks  # Save for test consistency
+  
+  # Apply same breaks to test data  
+  test_binning_result <- create_binned_variables(test_clean, train_breaks = binning_breaks)
+  test_clean <- test_binning_result$data
+  
+  cat("✓ Binned variables created using train-derived breaks\n")
+  
+  # Step 5c: Create Interaction Features
+  # ===================================
+  cat("\nSTEP 5c: Creating Interaction Features\n")
+  cat("---------------------------------------\n")
+  
+  # Create interaction terms (same function for both datasets)
+  train_clean <- create_interaction_features(train_clean)
+  test_clean <- create_interaction_features(test_clean)
+  
+  cat("✓ Interaction features created\n")
+  
   # Step 6: Column Alignment
   # ========================
   cat("\nSTEP 6: Column Alignment Enforcement\n")
@@ -841,7 +1046,7 @@ run_data_preparation_pipeline <- function(train_data, test_data, save_outputs = 
   # Validate train/test consistency
   consistency_checks <- list(
     train_test_cols_match = identical(sort(names(test_tree)), sort(setdiff(names(train_tree), "TARGET"))),
-    no_na_in_linear = !any(is.na(train_linear) | is.na(test_linear)),
+    no_na_in_linear = all(complete.cases(train_linear)) && all(complete.cases(test_linear)),
     params_from_train_only = imputation_params$computed_from_train_only,
     column_alignment = aligned_data$perfect_alignment
   )
@@ -880,6 +1085,7 @@ run_data_preparation_pipeline <- function(train_data, test_data, save_outputs = 
     # Save preprocessing parameters for production use
     comprehensive_params <- list(
       imputation = imputation_params,
+      binning_breaks = binning_breaks,
       nzv_variables = nzv_variables,
       column_alignment = aligned_data,
       consistency_checks = consistency_checks,
@@ -922,13 +1128,13 @@ run_data_preparation_pipeline <- function(train_data, test_data, save_outputs = 
     test_linear = test_linear,
     
     # Preprocessing artifacts
-    parameters = comprehensive_params,
+    parameters = if (save_outputs) comprehensive_params else NULL,
     nzv_variables = nzv_variables,
     consistency_checks = consistency_checks,
     
     # Metadata
     pipeline_success = all_checks_passed,
-    summary_stats = if(save_outputs) summary_stats else NULL
+    summary_stats = if (save_outputs) summary_stats else NULL
   ))
 }
 
