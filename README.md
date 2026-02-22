@@ -23,7 +23,7 @@ The `data_preparation.R` script is a **comprehensive, modular data preprocessing
 
 ---
 
-## 🏆 Machine Learning Models
+## Machine Learning Models
 
 The `HomeCredit_Modeling.qmd` notebook implements and compares multiple algorithms to find the best predictor for credit default.
 
@@ -42,13 +42,13 @@ The `HomeCredit_Modeling.qmd` notebook implements and compares multiple algorith
 - **Features**: 435 (after standardization and one-hot encoding)
 - **Training Time**: ~1-2 minutes
 - **Strengths**:
-  - ✅ Interpretable coefficients (regulatory compliant)
-  - ✅ Fast training
-  - ✅ Captures linear relationships effectively
+  - Interpretable coefficients (regulatory compliant)
+  - Fast training
+  - Captures linear relationships effectively
 - **Weaknesses**:
-  - ❌ Assumes linear relationships
-  - ❌ Sensitive to feature scaling
-  - ❌ Doesn't capture complex feature interactions
+  - Assumes linear relationships
+  - Sensitive to feature scaling
+  - Doesn't capture complex feature interactions
 - **Key Finding**: Feature engineering more valuable than interaction terms
 
 #### 3. **Random Forest**
@@ -56,27 +56,27 @@ The `HomeCredit_Modeling.qmd` notebook implements and compares multiple algorith
 - **Trees**: 100 with bootstrap aggregating
 - **Training Time**: ~2 minutes
 - **Strengths**:
-  - ✅ Handles missing values natively
-  - ✅ Robust to outliers
-  - ✅ Provides feature importance rankings
+  - Handles missing values natively
+  - Robust to outliers
+  - Provides feature importance rankings
 - **Weaknesses**:
-  - ❌ Struggles with class imbalance (8% defaults)
-  - ❌ Parallel tree building less effective at error correction
-  - ❌ Outperformed by gradient boosting methods
+  - Struggles with class imbalance (8% defaults)
+  - Parallel tree building less effective at error correction
+  - Outperformed by gradient boosting methods
 - **Finding**: Good baseline but sequential boosting superior for imbalanced data
 
-#### 4. **🏆 XGBoost (Extreme Gradient Boosting) - WINNER**
+#### 4. **XGBoost (Extreme Gradient Boosting) - WINNER**
 - **AUC**: 0.7455 (validation) | 0.75323 (Kaggle test)
 - **Configuration**: 200 rounds with early stopping, max_depth=6, scale_pos_weight=11.3
 - **Training Time**: ~6 seconds (extremely efficient)
 - **Default Detection Rate**: 43.4% recall (detects ~2,600 of ~6,000 actual defaults)
 - **Strengths**:
-  - ✅ **Best predictive performance** - highest AUC among all models
-  - ✅ Naturally handles missing values and class imbalance
-  - ✅ Automatically captures feature interactions
-  - ✅ Built-in regularization prevents overfitting
-  - ✅ Fast training enables rapid iteration
-  - ✅ Industry-proven for tabular data
+  - **Best predictive performance** - highest AUC among all models
+  - Naturally handles missing values and class imbalance
+  - Automatically captures feature interactions
+  - Built-in regularization prevents overfitting
+  - Fast training enables rapid iteration
+  - Industry-proven for tabular data
 - **Why It Wins**: Sequential tree building where each tree corrects previous errors is perfectly suited to learning from imbalanced data
 
 ### Performance Comparison
@@ -198,19 +198,19 @@ test_clean <- apply_imputation(test_data, params)    # Same parameters to test
 
 ## Key Features
 
-### ✅ **Zero Data Leakage**
+### **Zero Data Leakage**
 All preprocessing parameters (medians, quantiles, modes) are computed from **training data only** and applied consistently to test data:
 
 ```r
-# ✅ CORRECT - No data leakage
+# CORRECT - No data leakage
 params <- compute_imputation_parameters(train_data)  # Train only!
 test_imputed <- apply_imputation(test_data, params)  # Uses train medians
 
-# ❌ WRONG - Data leakage!  
+# WRONG - Data leakage!  
 # params <- compute_imputation_parameters(rbind(train, test))
 ```
 
-### ✅ **Modular & Reusable**
+### **Modular & Reusable**
 Every function works on both train and test data:
 ```r
 # Same function, different datasets
@@ -218,7 +218,7 @@ train_fixed <- fix_days_employed_sentinel(train_data)
 test_fixed <- fix_days_employed_sentinel(test_data)  # Identical processing
 ```
 
-### ✅ **Well Documented**
+### **Well Documented**
 Every function includes complete documentation:
 ```r
 #' Fix DAYS_EMPLOYED sentinel value
@@ -227,7 +227,7 @@ Every function includes complete documentation:
 #' @examples data_clean <- fix_days_employed_sentinel(data)
 ```
 
-### ✅ **Production Ready**
+### **Production Ready**
 ```r
 # Apply to new data using saved parameters
 new_processed <- preprocess_new_data(new_data, "preprocessing_parameters.rds")
@@ -250,27 +250,18 @@ new_processed <- preprocess_new_data(new_data, "preprocessing_parameters.rds")
 ## File Structure
 
 ```
-📁 data_preparation.R          # Complete preprocessing pipeline (this script)
-📁 README.md                   # This documentation
-📁 HomeCredit_EDA.qmd          # Exploratory data analysis  
-📁 .gitignore                  # Excludes data files from git
-📁 HomeCredit_columns_description.csv  # Data dictionary
+data_preparation.R          # Complete preprocessing pipeline (this script)
+README.md                   # This documentation
+HomeCredit_EDA.qmd          # Exploratory data analysis  
+.gitignore                  # Excludes data files from git
+HomeCredit_columns_description.csv  # Data dictionary
 ```
 
 ## Important Notes
 
-### 🚫 **Data Files Not Included**
-This repository contains **code only**. You need to provide:
-- `application_train.csv` - Training data
-- `application_test.csv` - Test data  
-- Transactional files (bureau.csv, etc.) - Optional for enhanced features
+### **Data Files Not Included**
+This repository contains **code only**.
 
-### ⚡ **Quick Start**
-1. Place your CSV files in the same directory
-2. Load data: `train <- read_csv("application_train.csv")`
-3. Run script: `source("data_preparation.R")`  
-4. Process: `result <- run_data_preparation_pipeline(train, test)`
-5. Model: Use `result$train_tree` and `result$test_tree` for XGBoost
 
 ## Why This Approach?
 
@@ -283,5 +274,3 @@ This script follows **industry best practices** for ML preprocessing:
 - **Maintainable**: Modular functions are easy to test and debug
 
 ---
-
-**Ready to preprocess your Home Credit data?** Just `source("data_preparation.R")` and run the pipeline! 🚀
