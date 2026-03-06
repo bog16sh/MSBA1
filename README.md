@@ -4,11 +4,66 @@ A comprehensive machine learning pipeline for predicting credit default using Ho
 
 ## Project Overview
 
-This repository contains two main components:
+This repository contains the following components:
 
 1. **Data Preparation Pipeline** (`data_preparation.R`) - Comprehensive preprocessing and feature engineering
-2. **Modeling Notebook** (`HomeCredit_Modeling.qmd`) - Model development and selection
-3. **EDA Analysis** (`HomeCredit_EDA.qmd`) - Exploratory data analysis
+2. **EDA Analysis** (`HomeCredit_EDA.qmd`) - Exploratory data analysis
+3. **Modeling Notebook** (`HomeCredit_Modeling.qmd`) - Model development and selection
+4. **Model Card** (`model_card.qmd`) - Production deployment assessment and documentation
+
+---
+
+## 📋 Model Card: Production Deployment Assessment
+
+The `model_card.qmd` notebook provides a comprehensive **business-ready assessment** of the XGBoost champion model for stakeholder review and regulatory compliance.
+
+### What It Contains
+
+| Section | Description |
+|---------|-------------|
+| **Executive Summary** | One-page summary for senior leadership with business recommendation and expected financial impact |
+| **Model Overview** | Architecture, hyperparameters, training data summary |
+| **Intended Use** | Target users, use cases, and out-of-scope applications |
+| **Cost-Based Threshold Analysis** | Optimal threshold derived from real lending economics (70% LGD, 5% profit margin) with sensitivity analysis |
+| **SHAP Explainability** | Global and individual-level feature explanations using SHAP values (1,000-row sample) |
+| **Adverse Action Mapping** | Regulatory-compliant mapping of model features to consumer-friendly denial reasons (ECOA/FCRA) |
+| **Fairness Analysis** | Approval rate disparities by gender and education level with disparate impact (80% rule) testing |
+| **Limitations & Risks** | Data, model, fairness, and operational risks with mitigations |
+| **Deployment Recommendations** | Pre-deployment checklist and recommended workflow |
+
+### Key Findings
+
+- **Recommended Threshold**: Cost-optimized threshold maximizes expected profit per application
+- **Financial Impact**: Estimated annual portfolio improvement of $XX million (computed dynamically)
+- **Top Predictive Features**: External credit scores (EXT_SOURCE) dominate, followed by financial ratios
+- **Fairness Status**: Disparate impact analysis identifies groups requiring further investigation
+
+### Cost Assumptions (Sourced)
+
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| Loss Given Default (LGD) | 70% | Basel II IRB framework; Moody's Analytics |
+| Profit Margin | 5% | Industry average: APR minus funding and operating costs |
+| Review Cost | $50/application | Industry estimate for credit analyst time |
+
+### Regulatory Compliance Features
+
+- **ECOA/FCRA Compliance**: Adverse action reasons mapped to consumer-friendly language
+- **SHAP Explanations**: Individual applicant explanations for denied applications
+- **Fairness Monitoring**: Disparate impact ratios computed for protected classes
+- **Audit Trail**: All assumptions and sources documented
+
+### How to Render
+
+```r
+# Render the model card to HTML
+quarto render model_card.qmd
+
+# The first render will train and save the model (~2 min)
+# Subsequent renders load the saved model (~30 sec)
+```
+
+---
 
 ## Data Preparation Script
 

@@ -6,6 +6,10 @@
 # All RDS files (processed data and models)
 *.rds
 
+# Specifically ensure model artifacts are excluded
+xgb_model_card.rds
+preprocessing_parameters.rds
+
 # Model objects and large intermediate files
 *.pkl
 *.joblib
