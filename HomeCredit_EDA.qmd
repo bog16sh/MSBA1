@@ -9,6 +9,8 @@ format:
     number-sections: true
     theme: cosmo
     embed-resources: true
+    code-fold: true
+    code-summary: "Show code"
 execute:
   echo: true
   warning: false
